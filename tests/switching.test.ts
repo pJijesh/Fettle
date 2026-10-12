@@ -97,11 +97,89 @@ describe("switching import", () => {
     expect(() => s.p.importer.undo(s.clinicId, "u", late.batchId!)).toThrowError(/7 days/);
   });
 
-  it("refuses files with no usable columns and cannot touch another clinic's batch", () => {
+  it("a dry run on a file with no usable columns reports the problem; saving it is refused; another clinic's batch is out of reach", () => {
     const s = platformSetup();
-    expect(() => s.p.importer.run(s.clinicId, "u", { kind: "patients", source: "other", filename: "x.csv", text: "foo,bar\n1,2", dryRun: true })).toThrowError(/No name columns/);
+    const dry = s.p.importer.run(s.clinicId, "u", { kind: "patients", source: "other", filename: "x.csv", text: "foo,bar\n1,2", dryRun: true });
+    expect(dry.problems[0]).toMatch(/first name/i);
+    expect(dry.created).toBe(0);
+    expect(dry.columns.map((c) => c.field)).toEqual([null, null]);
+    expect(() => s.p.importer.run(s.clinicId, "u", { kind: "patients", source: "other", filename: "x.csv", text: "foo,bar\n1,2", dryRun: false })).toThrowError(/first name/i);
     const rep = s.p.importer.run(s.clinicId, "u", { kind: "patients", source: "other", filename: "q.csv", text: "First Name,Last Name\nZed,Zulu", dryRun: false });
     expect(() => s.p.importer.undo("other-clinic", "u", rep.batchId!)).toThrowError(/not found/i);
+  });
+});
+
+describe("import options: column mapping, Excel, templates", () => {
+  const odd = "Surname,Forename,DoB (UK),Home,Street,Post code\nAble,Ann,04/03/1980,07700 900001,1 High St,tw13 4ab\nBaker,Ben,1975-12-31,07700 900002,2 Low Rd,TW1 1AA";
+
+  it("columns with unfamiliar headings can be mapped by hand, and the dry run then matches the real run", () => {
+    const s = platformSetup();
+    const first = s.p.importer.run(s.clinicId, "u", { kind: "patients", source: "tm3", filename: "t.csv", text: odd, dryRun: true });
+    expect(first.columns.find((c) => c.header === "Home")?.field).toBeNull();
+    expect(first.created).toBe(2);
+    const mapping = ["lastName", "firstName", "dob", "phone", "address", "postcode"];
+    const dry = s.p.importer.run(s.clinicId, "u", { kind: "patients", source: "tm3", filename: "t.csv", text: odd, mapping, dryRun: true });
+    expect(dry.columns.map((c) => c.field)).toEqual(mapping);
+    expect(dry.created).toBe(2);
+    expect(s.db.prepare("SELECT COUNT(*) AS n FROM patients WHERE import_batch IS NOT NULL").get()).toEqual({ n: 0 });
+    const real = s.p.importer.run(s.clinicId, "u", { kind: "patients", source: "tm3", filename: "t.csv", text: odd, mapping, dryRun: false });
+    expect(real.created).toBe(2);
+    const row = s.db.prepare("SELECT first_name, last_name, dob, phone, address, postcode FROM patients WHERE last_name = 'Able' AND import_batch IS NOT NULL").get();
+    expect(row).toMatchObject({ first_name: "Ann", last_name: "Able", dob: "1980-03-04", phone: "07700 900001", address: "1 High St", postcode: "TW13 4AB" });
+  });
+
+  it("a corrected mapping can swap columns and leave columns out; a field is only filled once", () => {
+    const s = platformSetup();
+    const text = "A,B,C\nAble,Ann,x\n";
+    const rep = s.p.importer.run(s.clinicId, "u", { kind: "patients", source: "other", filename: "t.csv", text, mapping: ["lastName", "firstName", null], dryRun: false });
+    expect(s.db.prepare("SELECT first_name, last_name FROM patients WHERE import_batch = ?").get(rep.batchId)).toEqual({ first_name: "Ann", last_name: "Able" });
+    const twice = s.p.importer.run(s.clinicId, "u", { kind: "patients", source: "other", filename: "t.csv", text, mapping: ["firstName", "firstName", "lastName"], dryRun: true });
+    expect(twice.columns.map((c) => c.field)).toEqual(["firstName", null, "lastName"]);
+  });
+
+  it("an appointments file with no patient column reports it so the person can choose one", () => {
+    const s = platformSetup();
+    const dry = s.p.importer.run(s.clinicId, "u", { kind: "appointments", source: "tm3", filename: "a.csv", text: "When,Who\n04/11/2026 10:00,Ann Able", dryRun: true });
+    expect(dry.problems.length).toBe(2);
+    const fixed = s.p.importer.run(s.clinicId, "u", { kind: "appointments", source: "tm3", filename: "a.csv", text: "When,Who\n04/11/2026 10:00,Ann Able", mapping: ["start", "patientName"], dryRun: true });
+    expect(fixed.problems).toEqual([]);
+  });
+
+  it("the downloadable templates are read back with every column recognised", async () => {
+    const { FIELDS } = await import("@/lib/import-meta");
+    const s = platformSetup();
+    for (const kind of ["patients", "appointments"] as const) {
+      const fields = FIELDS[kind].filter((f) => f.key !== "fullName" && f.key !== "date" && f.key !== "time");
+      const rows = [fields.map((f) => f.header), fields.map((f) => f.example)];
+      const rep = s.p.importer.run(s.clinicId, "u", { kind, source: "other", filename: "t.csv", rows, dryRun: true });
+      expect(rep.columns.map((c) => c.field)).toEqual(fields.map((f) => f.key));
+      expect(rep.problems).toEqual([]);
+    }
+  });
+
+  it("reads an Excel file (dates, numbers and the first sheet only) and old Windows-1252 CSV", async () => {
+    const { default: writeExcelFile } = await import("write-excel-file/node");
+    const { readTable, decodeCsv } = await import("@/lib/sheet");
+    const buf = await writeExcelFile([
+      ["First name", "Last name", "Date of birth", "Patient ID"],
+      ["Ann", "Able", { value: new Date(Date.UTC(1980, 2, 4)), type: Date, format: "dd/mm/yyyy" }, 10482],
+    ]).toBuffer();
+    const rows = await readTable("patients.xlsx", new Uint8Array(buf));
+    expect(rows).toEqual([["First name", "Last name", "Date of birth", "Patient ID"], ["Ann", "Able", "1980-03-04", "10482"]]);
+    const s = platformSetup();
+    const rep = s.p.importer.run(s.clinicId, "u", { kind: "patients", source: "writeupp", filename: "patients.xlsx", rows, dryRun: false });
+    expect(rep.created).toBe(1);
+    expect(s.db.prepare("SELECT dob, external_ref FROM patients WHERE import_batch = ?").get(rep.batchId)).toEqual({ dob: "1980-03-04", external_ref: "10482" });
+    await expect(readTable("old.xls", new Uint8Array([1]))).rejects.toThrowError(/\.xls/);
+    await expect(readTable("broken.xlsx", new Uint8Array([1, 2, 3]))).rejects.toThrowError(/could not be read/);
+    expect(decodeCsv(new Uint8Array([0x4f, 0x27, 0x42, 0x72, 0x69, 0x65, 0x6e, 0x2c, 0xa3]))).toBe("O'Brien,£");
+    expect(decodeCsv(new TextEncoder().encode("José"))).toBe("José");
+  });
+
+  it("consent is never imported: the patient has to agree again", () => {
+    const s = platformSetup();
+    s.p.importer.run(s.clinicId, "u", { kind: "patients", source: "tm3", filename: "t.csv", text: "First Name,Last Name,Email,SMS consent,Marketing\nAnn,Able,ann@example.com,yes,yes", dryRun: false });
+    expect(s.db.prepare("SELECT sms_consent_at, email_consent_at, marketing_consent_at FROM patients WHERE last_name = 'Able' AND import_batch IS NOT NULL").get()).toEqual({ sms_consent_at: null, email_consent_at: null, marketing_consent_at: null });
   });
 });
 

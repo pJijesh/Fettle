@@ -8,7 +8,8 @@ import { DomainError } from "@/lib/errors";
 import { clockToMinutes, isDate, zonedToUtc } from "@/lib/tz";
 import { baseUrl, fail, field, type ActionState } from "@/lib/action-util";
 import type { PatientInput } from "@/lib/scheduling";
-import type { ImportKind, ImportSource } from "@/lib/importer";
+import type { ImportKind, ImportSource } from "@/lib/import-meta";
+import { readTable } from "@/lib/sheet";
 
 const bool = (form: FormData, name: string) => form.get(name) === "yes";
 
@@ -21,6 +22,8 @@ function patientInput(form: FormData): PatientInput {
     phone: field(form, "phone") || null,
     gpName: field(form, "gpName") || null,
     gpPractice: field(form, "gpPractice") || null,
+    address: field(form, "address") || null,
+    postcode: field(form, "postcode") || null,
     smsConsent: bool(form, "smsConsent"),
     emailConsent: bool(form, "emailConsent"),
     marketingConsent: bool(form, "marketingConsent"),
@@ -348,14 +351,19 @@ export async function importAction(_prev: ActionState, form: FormData): Promise<
   const user = await requireUser(["owner"]);
   try {
     const file = form.get("file");
-    if (!(file instanceof File) || file.size === 0) return { ok: false, message: "Choose a CSV file to import." };
+    if (!(file instanceof File) || file.size === 0) return { ok: false, message: "Choose a CSV or Excel file to import." };
     if (file.size > 5_000_000) return { ok: false, message: "That file is over 5 MB. Split it and import in parts." };
     const dryRun = field(form, "mode") !== "commit";
+    const rows = await readTable(file.name, new Uint8Array(await file.arrayBuffer()));
+    // The person's corrections: one "map:<column number>" entry per column, holding a field name or nothing.
+    const hasMapping = [...form.keys()].some((k) => k.startsWith("map:"));
+    const mapping = hasMapping ? (rows[0] ?? []).map((_, i) => field(form, `map:${i}`) || null) : undefined;
     const report = getPlatform().importer.run(user.clinicId, user.email, {
-      kind: field(form, "kind") as ImportKind, source: field(form, "source") as ImportSource, filename: file.name, text: await file.text(), dryRun,
+      kind: field(form, "kind") as ImportKind, source: field(form, "source") as ImportSource, filename: file.name, rows, mapping, dryRun,
     });
     revalidatePath("/settings/import");
-    return { ok: true, data: report, message: dryRun ? "Dry run complete. Nothing has been saved yet." : "Import complete." };
+    // When columns are missing the panel explains it next to the column table, so no banner here.
+    return { ok: true, data: report, message: report.problems.length ? "" : dryRun ? "Dry run complete. Nothing has been saved yet." : "Import complete." };
   } catch (err) {
     return fail(err);
   }

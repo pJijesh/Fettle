@@ -129,6 +129,8 @@ CREATE TABLE IF NOT EXISTS patients (
   phone TEXT,
   gp_name TEXT,
   gp_practice TEXT,
+  address TEXT,
+  postcode TEXT,
   sms_consent_at TEXT,
   email_consent_at TEXT,
   marketing_consent_at TEXT,
@@ -347,6 +349,8 @@ function migrate(db: Db) {
   add("audit_log", "clinic_id", "TEXT");
   add("audit_log", "entity", "TEXT");
   add("appointments", "import_batch", "TEXT");
+  add("patients", "address", "TEXT");
+  add("patients", "postcode", "TEXT");
 }
 
 export function openDb(file: string): Db {

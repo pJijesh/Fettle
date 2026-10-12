@@ -19,7 +19,7 @@ export default async function ImportPage() {
         <p className="muted"><Link href="/settings">← Settings</Link></p>
         <h1>Switch from another system</h1>
         <div className="banner warn">
-          Export patients (and then appointments) from Cliniko, TM3 or WriteUpp as CSV and upload them here. Column names are matched loosely, but they have not been checked against every real export, so always run the dry run and read what it recognised and ignored. Treatment notes and invoices are not imported. Keep your old system until you have checked the result.
+          Move your patients, and then your appointments, from TM3, Cliniko, WriteUpp or any system that can save a list as CSV or Excel. Always run the dry run and check which column goes where: none of these systems publish their column headings, so nothing here has been checked against a real export. Keep your old system until you have checked the result.
         </div>
         <div className="card">
           <h2>Import a file</h2>

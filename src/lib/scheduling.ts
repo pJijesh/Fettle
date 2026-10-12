@@ -22,6 +22,8 @@ export interface Patient {
   phone: string | null;
   gpName: string | null;
   gpPractice: string | null;
+  address: string | null;
+  postcode: string | null;
   smsConsentAt: string | null;
   emailConsentAt: string | null;
   marketingConsentAt: string | null;
@@ -36,6 +38,8 @@ export interface PatientInput {
   phone?: string | null;
   gpName?: string | null;
   gpPractice?: string | null;
+  address?: string | null;
+  postcode?: string | null;
   smsConsent?: boolean;
   emailConsent?: boolean;
   marketingConsent?: boolean;
@@ -168,13 +172,13 @@ export class Scheduling {
     const now = this.ts();
     this.db
       .prepare(
-        `INSERT INTO patients (id, clinic_id, first_name, last_name, dob, email, phone, gp_name, gp_practice,
+        `INSERT INTO patients (id, clinic_id, first_name, last_name, dob, email, phone, gp_name, gp_practice, address, postcode,
            sms_consent_at, email_consent_at, marketing_consent_at, created_at, updated_at)
-         VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+         VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
       )
       .run(
         id, clinicId, input.firstName.trim(), input.lastName.trim(), clean(input.dob, 10), clean(input.email)?.toLowerCase() ?? null,
-        clean(input.phone, 30), clean(input.gpName), clean(input.gpPractice),
+        clean(input.phone, 30), clean(input.gpName), clean(input.gpPractice), clean(input.address, 200), clean(input.postcode, 12)?.toUpperCase() ?? null,
         input.smsConsent ? now : null, input.emailConsent ? now : null, input.marketingConsent ? now : null, now, now,
       );
     this.audit(clinicId, by, "patient.created", "patient", { patientId: id });
@@ -191,6 +195,8 @@ export class Scheduling {
       phone: (r.phone as string) ?? null,
       gpName: (r.gp_name as string) ?? null,
       gpPractice: (r.gp_practice as string) ?? null,
+      address: (r.address as string) ?? null,
+      postcode: (r.postcode as string) ?? null,
       smsConsentAt: (r.sms_consent_at as string) ?? null,
       emailConsentAt: (r.email_consent_at as string) ?? null,
       marketingConsentAt: (r.marketing_consent_at as string) ?? null,
@@ -220,12 +226,12 @@ export class Scheduling {
     const keepOrSet = (flag: boolean | undefined, current: string | null) => (flag ? (current ?? now) : null);
     this.db
       .prepare(
-        `UPDATE patients SET first_name=?, last_name=?, dob=?, email=?, phone=?, gp_name=?, gp_practice=?,
+        `UPDATE patients SET first_name=?, last_name=?, dob=?, email=?, phone=?, gp_name=?, gp_practice=?, address=?, postcode=?,
            sms_consent_at=?, email_consent_at=?, marketing_consent_at=?, updated_at=? WHERE id=? AND clinic_id=?`,
       )
       .run(
         input.firstName.trim(), input.lastName.trim(), clean(input.dob, 10), clean(input.email)?.toLowerCase() ?? null,
-        clean(input.phone, 30), clean(input.gpName), clean(input.gpPractice),
+        clean(input.phone, 30), clean(input.gpName), clean(input.gpPractice), clean(input.address, 200), clean(input.postcode, 12)?.toUpperCase() ?? null,
         keepOrSet(input.smsConsent, existing.smsConsentAt), keepOrSet(input.emailConsent, existing.emailConsentAt),
         keepOrSet(input.marketingConsent, existing.marketingConsentAt), now, id, clinicId,
       );

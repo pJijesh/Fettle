@@ -2,6 +2,7 @@ import crypto from "node:crypto";
 import type { Db } from "./db";
 import { DomainError } from "./errors";
 import { parseCsv } from "./csv";
+import { FIELDS, type FieldDef, type ImportKind, type ImportSource } from "./import-meta";
 import { isDate, utcToZoned, zonedToUtc } from "./tz";
 import type { Scheduling } from "./scheduling";
 
@@ -14,8 +15,7 @@ import type { Scheduling } from "./scheduling";
  * The dry run executes the real import inside a transaction and rolls it back, so it cannot disagree with the real run.
  */
 
-export type ImportKind = "patients" | "appointments";
-export type ImportSource = "cliniko" | "tm3" | "writeupp" | "other";
+export type { ImportKind, ImportSource };
 
 const MAX_BYTES = 5_000_000;
 const MAX_ROWS = 20_000;
@@ -33,6 +33,8 @@ const PATIENT_ALIASES: Record<string, string[]> = {
   gpName: ["gp", "gpname", "doctor", "referrer"],
   gpPractice: ["gppractice", "surgery", "practice"],
   ref: ["id", "patientid", "clientid", "reference", "ref", "patientnumber", "clientnumber", "externalid"],
+  address: ["address", "addressline1", "address1", "streetaddress", "homeaddress", "street"],
+  postcode: ["postcode", "postalcode", "zip", "zipcode", "postcodezip"],
 };
 
 const APPT_ALIASES: Record<string, string[]> = {
@@ -48,8 +50,32 @@ const APPT_ALIASES: Record<string, string[]> = {
   status: ["status", "appointmentstatus", "outcome"],
 };
 
+function missingRequired(kind: ImportKind, col: Record<string, number>): string[] {
+  if (kind === "patients") {
+    return ("firstName" in col && "lastName" in col) || "fullName" in col ? [] : ["Choose which column holds the first name and which the last name (or one column with the full name)."];
+  }
+  const out: string[] = [];
+  if (!("start" in col) && !("date" in col && "time" in col)) out.push("Choose the column with the appointment start (or separate date and time columns).");
+  if (!("patientRef" in col || "patientEmail" in col || "patientName" in col)) out.push("Choose a column that identifies the patient: name, email or id.");
+  return out;
+}
+
+export interface ColumnInfo {
+  index: number;
+  header: string;
+  /** The field this column fills, or null when it is ignored. */
+  field: string | null;
+  sample: string[];
+}
+
 export interface ImportReport {
   kind: ImportKind;
+  source: ImportSource;
+  /** Every column in the file with what it was matched to, so a person can correct it. */
+  columns: ColumnInfo[];
+  fields: FieldDef[];
+  /** Reasons the file cannot be imported yet (for example no name column). Empty when it can. */
+  problems: string[];
   dryRun: boolean;
   batchId: string | null;
   rows: number;
@@ -61,19 +87,44 @@ export interface ImportReport {
   preview: string[];
 }
 
-function mapHeaders(header: string[], aliases: Record<string, string[]>) {
+interface Mapped {
+  col: Record<string, number>;
+  recognised: string[];
+  ignored: string[];
+  columns: ColumnInfo[];
+}
+
+/**
+ * Works out which column fills which field. By default this is a loose match on the heading. When the person has
+ * corrected the mapping, `override` (one field key or null per column) is used exactly as given.
+ */
+function mapHeaders(table: string[][], aliases: Record<string, string[]>, override?: (string | null)[]): Mapped {
+  const header = table[0];
   const col: Record<string, number> = {};
-  const recognised: string[] = [];
-  const ignored: string[] = [];
-  header.forEach((h, i) => {
-    const n = norm(h);
-    const key = Object.keys(aliases).find((k) => !(k in col) && aliases[k].includes(n));
-    if (key) {
-      col[key] = i;
-      recognised.push(`${h.trim()} → ${key}`);
-    } else if (h.trim()) ignored.push(h.trim());
-  });
-  return { col, recognised, ignored };
+  const fieldOf: (string | null)[] = header.map(() => null);
+  if (override) {
+    header.forEach((_, i) => {
+      const k = override[i];
+      if (k && k in aliases && !(k in col)) {
+        col[k] = i;
+        fieldOf[i] = k;
+      }
+    });
+  } else {
+    header.forEach((h, i) => {
+      const n = norm(h);
+      const key = Object.keys(aliases).find((k) => !(k in col) && aliases[k].includes(n));
+      if (key) {
+        col[key] = i;
+        fieldOf[i] = key;
+      }
+    });
+  }
+  const sampleRows = table.slice(1, 4);
+  const columns = header.map((h, i) => ({ index: i, header: h.trim(), field: fieldOf[i], sample: sampleRows.map((r) => (r[i] ?? "").trim()).filter(Boolean).slice(0, 3) }));
+  const recognised = columns.filter((c) => c.field).map((c) => `${c.header} → ${c.field}`);
+  const ignored = columns.filter((c) => !c.field && c.header).map((c) => c.header);
+  return { col, recognised, ignored, columns };
 }
 
 /** UK order: day first. Accepts 2026-03-04, 04/03/2026, 4-3-2026, 04.03.2026. */
@@ -135,16 +186,37 @@ export class Importer {
     return this.now().toISOString();
   }
 
-  run(clinicId: string, by: string, input: { kind: ImportKind; source: ImportSource; filename: string; text: string; dryRun: boolean }): ImportReport {
-    if (Buffer.byteLength(input.text) > MAX_BYTES) throw new DomainError("validation", "That file is too large. Split it into files under 5 MB.");
-    const table = parseCsv(input.text);
+  /**
+   * `rows` is a file already read into text (CSV or Excel); `text` is raw CSV. `mapping` is one field key (or null) per
+   * column, as corrected by the person; without it columns are matched by heading.
+   */
+  run(
+    clinicId: string,
+    by: string,
+    input: { kind: ImportKind; source: ImportSource; filename: string; text?: string; rows?: string[][]; mapping?: (string | null)[]; dryRun: boolean },
+  ): ImportReport {
+    if (input.text !== undefined && Buffer.byteLength(input.text) > MAX_BYTES) throw new DomainError("validation", "That file is too large. Split it into files under 5 MB.");
+    const table = input.rows ?? parseCsv(input.text ?? "");
     if (table.length < 2) throw new DomainError("validation", "The file has no rows to import. It needs a header row and at least one row of data.");
     if (table.length - 1 > MAX_ROWS) throw new DomainError("validation", `Too many rows. Import at most ${MAX_ROWS.toLocaleString("en-GB")} at a time.`);
+
+    const aliases = input.kind === "patients" ? PATIENT_ALIASES : APPT_ALIASES;
+    const mapped = mapHeaders(table, aliases, input.mapping);
+    const problems = missingRequired(input.kind, mapped.col);
+    const base = (): ImportReport => ({
+      kind: input.kind, source: input.source, columns: mapped.columns, fields: FIELDS[input.kind], problems, dryRun: input.dryRun, batchId: null,
+      rows: table.length - 1, recognised: mapped.recognised, ignored: mapped.ignored, created: 0, existing: 0, rejected: [], preview: [],
+    });
+    if (problems.length) {
+      // A dry run reports this so the person can fix the columns; saving is refused.
+      if (input.dryRun) return base();
+      throw new DomainError("validation", problems[0], problems.map((message) => ({ path: "file", message })));
+    }
 
     const batchId = crypto.randomUUID();
     this.db.exec("BEGIN IMMEDIATE");
     try {
-      const report = input.kind === "patients" ? this.patients(clinicId, by, batchId, table) : this.appointments(clinicId, by, batchId, table);
+      const report = input.kind === "patients" ? this.patients(clinicId, by, batchId, table, mapped, base()) : this.appointments(clinicId, by, batchId, table, mapped, base());
       report.dryRun = input.dryRun;
       if (input.dryRun) {
         this.db.exec("ROLLBACK");
@@ -168,12 +240,8 @@ export class Importer {
     }
   }
 
-  private patients(clinicId: string, by: string, batchId: string, table: string[][]): ImportReport {
-    const { col, recognised, ignored } = mapHeaders(table[0], PATIENT_ALIASES);
-    if (!(("firstName" in col && "lastName" in col) || "fullName" in col)) {
-      throw new DomainError("validation", "No name columns found", [{ path: "file", message: "The file needs first name and last name columns (or one name column). Columns found: " + table[0].join(", ") }]);
-    }
-    const report: ImportReport = { kind: "patients", dryRun: true, batchId, rows: table.length - 1, recognised, ignored, created: 0, existing: 0, rejected: [], preview: [] };
+  private patients(clinicId: string, by: string, batchId: string, table: string[][], { col }: Mapped, report: ImportReport): ImportReport {
+    report.batchId = batchId;
     const get = (r: string[], k: string) => (k in col ? (r[col[k]] ?? "").trim() : "");
     for (let i = 1; i < table.length; i++) {
       const r = table[i];
@@ -193,7 +261,7 @@ export class Importer {
         continue;
       }
       try {
-        const id = this.scheduling.createPatient(clinicId, by, { firstName: first, lastName: last, dob, email: email || null, phone: get(r, "phone") || null, gpName: get(r, "gpName") || null, gpPractice: get(r, "gpPractice") || null });
+        const id = this.scheduling.createPatient(clinicId, by, { firstName: first, lastName: last, dob, email: email || null, phone: get(r, "phone") || null, gpName: get(r, "gpName") || null, gpPractice: get(r, "gpPractice") || null, address: get(r, "address") || null, postcode: get(r, "postcode") || null });
         this.db.prepare("UPDATE patients SET external_ref = ?, import_batch = ? WHERE id = ?").run(get(r, "ref") || null, batchId, id);
         report.created++;
         if (report.preview.length < 5) report.preview.push(`${first} ${last}${dob ? `, born ${dob}` : ""}`);
@@ -205,18 +273,11 @@ export class Importer {
     return report;
   }
 
-  private appointments(clinicId: string, by: string, batchId: string, table: string[][]): ImportReport {
-    const { col, recognised, ignored } = mapHeaders(table[0], APPT_ALIASES);
-    if (!("start" in col) && !("date" in col && "time" in col)) {
-      throw new DomainError("validation", "No start time column found", [{ path: "file", message: "The file needs a start column, or separate date and time columns. Columns found: " + table[0].join(", ") }]);
-    }
-    if (!("patientRef" in col || "patientEmail" in col || "patientName" in col)) {
-      throw new DomainError("validation", "No patient column found", [{ path: "file", message: "The file needs a patient name, email or id column. Columns found: " + table[0].join(", ") }]);
-    }
+  private appointments(clinicId: string, by: string, batchId: string, table: string[][], { col }: Mapped, report: ImportReport): ImportReport {
+    report.batchId = batchId;
     const tz = this.scheduling.clinic(clinicId).timezone;
     const types = this.scheduling.listTypes(clinicId);
     const people = this.scheduling.clinicians(clinicId);
-    const report: ImportReport = { kind: "appointments", dryRun: true, batchId, rows: table.length - 1, recognised, ignored, created: 0, existing: 0, rejected: [], preview: [] };
     const get = (r: string[], k: string) => (k in col ? (r[col[k]] ?? "").trim() : "");
     const nowIso = this.ts();
 

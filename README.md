@@ -18,7 +18,7 @@ This repository holds **Phase 0** (the consultation workflow) and **Phase 1** (t
 | E1.6 Waiting list | When a time is freed, the first five matching people are offered it for 15 minutes; the first to accept gets it (single conditional update). Live offers hold the time against other bookings. Unanswered offers expire and go to the next people |
 | E1.7 Messages | Confirmation, reminder (24 hours ahead), cancellation, moved, offer and sign-in code. Queued once each (idempotency keys). Texts only go to patients who agreed. Retries with back-off, gives up after five tries |
 | E1.10 Calendar feed | Read-only iCalendar link per clinician, secret URL (hash stored), initials and type only |
-| E1.11 Switching import | Patients and appointments from CSV, with a dry run that executes the real import and rolls it back, then confirm, then undo for 7 days |
+| E1.11 Switching import | Patients and appointments from **CSV or Excel (.xlsx)** from TM3, Cliniko, WriteUpp or anything else. Per-system export guidance, downloadable templates, and a **column check** where you choose which column goes into which field. Dry run that executes the real import and rolls it back, then confirm, then undo for 7 days. Consent is never imported |
 
 ## Run it
 
@@ -28,7 +28,7 @@ Needs Node 22.13 or later.
 npm install
 cp .env.example .env.local     # set LINK_SECRET (and APP_BASE_URL outside localhost)
 npm run dev                    # http://localhost:3000, goes to /setup on first run
-npm test                       # 92 tests
+npm test                       # 98 tests
 npm run typecheck
 npm run build && npm start
 ```
@@ -45,7 +45,7 @@ A background tick runs every 30 seconds inside the app (reminders, waiting-list 
 | Diary, double-booking protection, time zones (including both clock changes) | Built and tested. Times are stored in UTC and shown in the clinic's zone (Europe/London) |
 | **Email and text sending** | **Not connected.** A development mailer accepts messages and the Outbox page lists them; nothing leaves the machine, and a banner says so on every staff page. A real provider needs a contract, a sender domain and a UK data-processing agreement, then an implementation of the `Mailer` interface in `src/lib/outbox.ts` |
 | **Tenancy** | Every query carries a clinic id and cross-clinic tests exist, but this is enforced in application code. **Postgres with row-level security in a UK region is still to do and is a gate item before a second clinic or real data** |
-| **Import** | Column names are matched loosely against names these systems commonly use. **They have not been checked against real Cliniko, TM3 or WriteUpp exports**, so the dry run shows what it recognised and ignored. Treatment notes and invoices are not imported |
+| **Import** | CSV and Excel through a column check you can correct by hand. None of the three vendors publish their column headings, so **nothing has been checked against a real Cliniko, TM3 or WriteUpp export**. **TM3's own data extraction (a `tmBase` folder) cannot be read**; a sample would be needed to build and test a reader. Treatment notes, documents, invoices and consent are not imported |
 | Drafting | **Mock provider by default** (a keyword matcher, labelled as not clinical). `AI_PROVIDER=anthropic` is available but **has not been exercised against the live API** |
 | Cliniko write-back | **Payload unverified against the live API.** Idempotent; an uncertain outcome stops at "needs check" and asks a person |
 | Rate limiting | In memory, one process. Move to a shared store before running more than one instance |
@@ -55,7 +55,7 @@ A background tick runs every 30 seconds inside the app (reminders, waiting-list 
 
 ## Checked
 
-- 92 automated tests: domain rules, accounts and second factor, clock-change days, overlap protection (service and database), concurrent booking, online booking, manage links, forms, portal codes, waiting list (first accept wins, expiry, matching), outbox idempotency and retries, reminders, calendar feed, import with dry run and undo.
+- 98 automated tests: domain rules, accounts and second factor, clock-change days, overlap protection (service and database), concurrent booking, online booking, manage links, forms, portal codes, waiting list (first accept wins, expiry, matching), outbox idempotency and retries, reminders, calendar feed, import with dry run, column mapping, Excel and undo.
 - Browser walkthrough of every screen: first-run set-up and two-step sign-in, booking and portal as a patient on a phone, drag-and-drop on the calendar, role restrictions (reception cannot reach settings, consultations, import or the outbox), lock-out.
 - Automated accessibility scan (axe, WCAG 2.1 AA and best practice) on every page in light and dark, at 390 px and desktop widths, with no violations. This does not replace a manual screen-reader and keyboard review.
 

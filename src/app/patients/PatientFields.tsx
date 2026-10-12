@@ -32,6 +32,14 @@ export function PatientFields({ p }: { p?: Patient }) {
           <label htmlFor="gpPractice">GP practice</label>
           <input id="gpPractice" name="gpPractice" defaultValue={p?.gpPractice ?? ""} autoComplete="off" />
         </div>
+        <div>
+          <label htmlFor="address">Address</label>
+          <input id="address" name="address" defaultValue={p?.address ?? ""} maxLength={200} autoComplete="off" />
+        </div>
+        <div>
+          <label htmlFor="postcode">Postcode</label>
+          <input id="postcode" name="postcode" defaultValue={p?.postcode ?? ""} maxLength={12} autoComplete="off" />
+        </div>
       </div>
       <fieldset>
         <legend>What the patient has agreed to</legend>
