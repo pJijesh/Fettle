@@ -1,6 +1,6 @@
-# Consult-to-Programme (Phase 1)
+# Fettle (Phase 1)
 
-A UK practice-management system for physiotherapy clinics, built to replace TM3, Cliniko and WriteUpp, with the consultation-to-programme workflow at its core: one consultation transcript becomes a structured SOAP note and a home exercise programme, a physio reviews both at a single approval gate, and the patient gets a no-login link with a two-tap check-in.
+Fettle is a UK practice-management system for physiotherapy clinics, built to replace TM3, Cliniko and WriteUpp, with the consultation-to-programme workflow at its core: one consultation transcript becomes a structured SOAP note and a home exercise programme, a physio reviews both at a single approval gate, and the patient gets a no-login link with a two-tap check-in.
 
 This repository holds **Phase 0** (the consultation workflow) and **Phase 1** (the diary and front desk). It is a pilot-grade prototype, not a certified clinical product. The full plan, with what is still to come, is in the PRD (v2).
 

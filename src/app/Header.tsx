@@ -30,7 +30,7 @@ export function Header({ user }: { user: SessionUser }) {
         </div>
       ) : null}
       <div className="in">
-        <Link href="/calendar" className="brand">Consult-to-Programme</Link>
+        <Link href="/calendar" className="brand">Fettle</Link>
         <Nav items={items} />
         <form action={logoutAction} className="row who">
           <span className="muted">{user.name} · {ROLE[user.role]}</span>

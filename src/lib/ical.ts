@@ -86,7 +86,7 @@ export class Ical {
     const lines = [
       "BEGIN:VCALENDAR",
       "VERSION:2.0",
-      "PRODID:-//Consult-to-Programme//Diary//EN",
+      "PRODID:-//Fettle//Diary//EN",
       "CALSCALE:GREGORIAN",
       "METHOD:PUBLISH",
       `X-WR-CALNAME:${esc(`${clinic.name}: ${user.name}`)}`,
@@ -95,7 +95,7 @@ export class Ical {
     for (const r of rows) {
       lines.push(
         "BEGIN:VEVENT",
-        `UID:${r.id}@consult-to-programme`,
+        `UID:${r.id}@fettle`,
         `DTSTAMP:${stamp(r.updated_at)}`,
         `DTSTART:${stamp(r.start_at)}`,
         `DTEND:${stamp(r.end_at)}`,
