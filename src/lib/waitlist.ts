@@ -107,7 +107,7 @@ export class Waitlist {
     });
   }
 
-  remove(clinicId: string, by: string, id: string): Promise<void> {
+  async remove(clinicId: string, by: string, id: string): Promise<void> {
     return this.db.scope(clinicId, async () => {
       const n = await this.db.run("UPDATE waitlist SET status = 'removed' WHERE id = ? AND clinic_id = ? AND status IN ('waiting','offered')", [id, clinicId]);
       if (!n) throw new DomainError("not_found", "Waiting-list entry not found");
@@ -116,7 +116,7 @@ export class Waitlist {
     });
   }
 
-  list(clinicId: string, includeClosed = false): Promise<WaitlistEntry[]> {
+  async list(clinicId: string, includeClosed = false): Promise<WaitlistEntry[]> {
     return this.db.scope(clinicId, async () => {
       const rows = await this.db.all(
         `SELECT w.*, p.first_name || ' ' || p.last_name AS patient_name, t.name AS type_name, u.name AS clinician_name
@@ -150,7 +150,7 @@ export class Waitlist {
   }
 
   /** Offers a free slot to up to five matching people who have not already been offered it. Returns how many were offered. */
-  offerSlot(slot: FreedSlot): Promise<number> {
+  async offerSlot(slot: FreedSlot): Promise<number> {
     return this.db.scope(slot.clinicId, async () => {
       await this.db.lock(`clinician:${slot.userId}`);
       if (!(await this.slotIsFree(slot))) return 0;
@@ -263,7 +263,7 @@ export class Waitlist {
   }
 
   /** Worker step for one clinic: ends offers nobody answered, returns people to the list, and offers the slot to the next five. */
-  expireOffers(clinicId: string): Promise<{ expired: number; reoffered: number }> {
+  async expireOffers(clinicId: string): Promise<{ expired: number; reoffered: number }> {
     return this.db.scope(clinicId, async () => {
       const due = await this.db.all<{ id: string; clinic_id: string; waitlist_id: string; batch_id: string; type_id: string; user_id: string; start_at: string; end_at: string }>(
         "SELECT id, clinic_id, waitlist_id, batch_id, type_id, user_id, start_at, end_at FROM waitlist_offers WHERE status = 'sent' AND expires_at <= ?",

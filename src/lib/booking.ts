@@ -197,7 +197,7 @@ export class Booking {
     return this.db.scope(clinicId, () => fn(id, clinicId));
   }
 
-  formByToken(token: string): Promise<{ request: FormRequestView; clinicName: string; patientFirstName: string }> {
+  async formByToken(token: string): Promise<{ request: FormRequestView; clinicName: string; patientFirstName: string }> {
     return this.formScope(token, async (id, clinicId) => {
       const request = await this.forms.request(id);
       const clinic = await this.scheduling.clinic(clinicId);
@@ -206,7 +206,7 @@ export class Booking {
     });
   }
 
-  submitForm(token: string, answers: Record<string, string>): Promise<void> {
+  async submitForm(token: string, answers: Record<string, string>): Promise<void> {
     return this.formScope(token, async (id, clinicId) => {
       const request = await this.forms.request(id);
       await this.forms.complete(id, answers);

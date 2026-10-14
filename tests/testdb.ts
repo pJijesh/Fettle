@@ -1,6 +1,6 @@
 import crypto from "node:crypto";
 import pg from "pg";
-import { Db, createPool } from "@/lib/db";
+import { Db, createPool, numberPlaceholders } from "@/lib/db";
 
 const ADMIN = process.env.TEST_DATABASE_URL ?? "postgres://postgres@127.0.0.1:54329/postgres";
 
@@ -19,6 +19,12 @@ export interface TestDb {
   db: Db;
   /** A superuser connection to the same database, for arranging and checking things the app cannot see. */
   admin: pg.Pool;
+  /** Plain queries as the superuser, for arranging and checking rows in tests. `?` placeholders, like the app's. */
+  q: {
+    all<T = Record<string, unknown>>(sql: string, params?: unknown[]): Promise<T[]>;
+    get<T = Record<string, unknown>>(sql: string, params?: unknown[]): Promise<T | undefined>;
+    run(sql: string, params?: unknown[]): Promise<number>;
+  };
   name: string;
   drop(): Promise<void>;
 }
@@ -32,9 +38,15 @@ export async function createTestDb(): Promise<TestDb> {
   await boot.end();
   const db = new Db(createPool(withDb(ADMIN, name, "fettle_app", "fettle_app"), 5));
   const admin = new pg.Pool({ connectionString: withDb(ADMIN, name), max: 2 });
+  const all = async <T>(sql: string, params: unknown[] = []) => (await admin.query(numberPlaceholders(sql), params)).rows as T[];
   return {
     db,
     admin,
+    q: {
+      all,
+      get: async <T>(sql: string, params: unknown[] = []) => (await all<T>(sql, params))[0],
+      run: async (sql: string, params: unknown[] = []) => (await admin.query(numberPlaceholders(sql), params)).rowCount ?? 0,
+    },
     name,
     async drop() {
       await db.close();

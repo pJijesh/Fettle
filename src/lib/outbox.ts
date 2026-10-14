@@ -53,7 +53,7 @@ export class Outbox {
   ) {}
 
   /** Returns true when queued, false when the same key was queued before. */
-  queue(m: QueueInput): Promise<boolean> {
+  async queue(m: QueueInput): Promise<boolean> {
     return this.db.scope(m.clinicId, async () => {
       const n = await this.db.run(
         `INSERT INTO outbox (id, clinic_id, channel, to_addr, subject, body, kind, status, attempts, send_after, idempotency_key, created_at)

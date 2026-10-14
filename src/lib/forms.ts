@@ -84,11 +84,11 @@ export class Forms {
     };
   }
 
-  list(clinicId: string): Promise<FormDef[]> {
+  async list(clinicId: string): Promise<FormDef[]> {
     return this.db.scope(clinicId, async () => (await this.db.all("SELECT * FROM forms WHERE clinic_id = ? ORDER BY name", [clinicId])).map((r) => this.toDef(r)));
   }
 
-  get(clinicId: string, id: string): Promise<FormDef> {
+  async get(clinicId: string, id: string): Promise<FormDef> {
     return this.db.scope(clinicId, async () => {
       const r = await this.db.get("SELECT * FROM forms WHERE id = ? AND clinic_id = ?", [id, clinicId]);
       if (!r) throw new DomainError("not_found", "Form not found");
@@ -143,7 +143,7 @@ export class Forms {
   }
 
   /** Attaches every active form to a new appointment. Used by the booking hook. */
-  requestForAppointment(a: AppointmentView, clinicId: string): Promise<FormRequestView[]> {
+  async requestForAppointment(a: AppointmentView, clinicId: string): Promise<FormRequestView[]> {
     return this.db.scope(clinicId, async () => {
       const forms = (await this.list(clinicId)).filter((f) => f.active);
       const out: string[] = [];

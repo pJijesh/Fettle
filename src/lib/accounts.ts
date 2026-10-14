@@ -126,7 +126,7 @@ export class Accounts {
     return id;
   }
 
-  createUser(actor: SessionUser, input: { name: string; email: string; password: string; role: Role }): Promise<string> {
+  async createUser(actor: SessionUser, input: { name: string; email: string; password: string; role: Role }): Promise<string> {
     if (actor.role !== "owner") throw new DomainError("forbidden", "Only the clinic owner can add staff");
     if (!["owner", "clinician", "reception"].includes(input.role)) throw new DomainError("validation", "Choose a role");
     const issues = this.userIssues(input);
@@ -149,7 +149,7 @@ export class Accounts {
     );
   }
 
-  deactivateUser(actor: SessionUser, userId: string): Promise<void> {
+  async deactivateUser(actor: SessionUser, userId: string): Promise<void> {
     if (actor.role !== "owner") throw new DomainError("forbidden", "Only the clinic owner can change staff");
     if (userId === actor.id) throw new DomainError("invalid_state", "You cannot deactivate your own account");
     return this.db.scope(actor.clinicId, async () => {
@@ -160,7 +160,7 @@ export class Accounts {
     });
   }
 
-  resetPassword(actor: SessionUser, userId: string, password: string): Promise<void> {
+  async resetPassword(actor: SessionUser, userId: string, password: string): Promise<void> {
     if (actor.role !== "owner") throw new DomainError("forbidden", "Only the clinic owner can reset passwords");
     return this.db.scope(actor.clinicId, async () => {
       const target = await this.db.get<{ email: string }>("SELECT email FROM users WHERE id = ? AND clinic_id = ?", [userId, actor.clinicId]);

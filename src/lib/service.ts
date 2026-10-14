@@ -185,7 +185,7 @@ export class Service {
     return row;
   }
 
-  private approvalRow(id: string): Promise<ApprovalRow | undefined> {
+  private async approvalRow(id: string): Promise<ApprovalRow | undefined> {
     return this.db.get<ApprovalRow>("SELECT * FROM approvals WHERE consult_id = ?", [id]);
   }
 
@@ -222,7 +222,7 @@ export class Service {
     });
   }
 
-  listConsults(limit = 50): Promise<ConsultSummary[]> {
+  async listConsults(limit = 50): Promise<ConsultSummary[]> {
     return this.in(async () => {
       const rows = await this.db.all<Pick<ConsultRow, "id" | "patient_label" | "practitioner" | "status" | "updated_at">>(
         "SELECT id, patient_label, practitioner, status, updated_at FROM consults WHERE clinic_id = ? ORDER BY updated_at DESC LIMIT ?",
@@ -232,7 +232,7 @@ export class Service {
     });
   }
 
-  getConsult(id: string): Promise<ConsultView> {
+  async getConsult(id: string): Promise<ConsultView> {
     return this.in(async () => {
       const row = await this.row(id);
       const approval = await this.approvalRow(id);
@@ -281,7 +281,7 @@ export class Service {
     });
   }
 
-  setPmsPatientId(id: string, pmsPatientId: string, actor: string): Promise<void> {
+  async setPmsPatientId(id: string, pmsPatientId: string, actor: string): Promise<void> {
     return this.in(async () => {
       const row = await this.row(id);
       const value = pmsPatientId.trim();
@@ -294,7 +294,7 @@ export class Service {
 
   // ---------------------------------------------------------------- consent (R1)
 
-  recordConsent(id: string, input: { method: string; by: string }, actor: string): Promise<void> {
+  async recordConsent(id: string, input: { method: string; by: string }, actor: string): Promise<void> {
     return this.in(async () => {
       const row = await this.row(id, true);
       this.requireEditable(row);
@@ -312,7 +312,7 @@ export class Service {
   }
 
   /** Patient withdraws consent before approval: transcript and drafts are deleted and capture stops. */
-  withdrawConsent(id: string, actor: string): Promise<void> {
+  async withdrawConsent(id: string, actor: string): Promise<void> {
     return this.in(async () => {
       const row = await this.row(id, true);
       if (row.status === "approved") {
@@ -336,7 +336,7 @@ export class Service {
 
   // ---------------------------------------------------------------- capture and drafting (R2, R4)
 
-  saveTranscript(id: string, text: string, actor: string): Promise<void> {
+  async saveTranscript(id: string, text: string, actor: string): Promise<void> {
     return this.in(async () => {
       const row = await this.row(id, true);
       this.requireEditable(row);
@@ -410,7 +410,7 @@ export class Service {
   }
 
   /** Saves the physio's edits. Shape is checked here; cross-field rules are enforced at approval. */
-  saveDrafts(id: string, input: { note: unknown; programme: unknown }, actor: string): Promise<void> {
+  async saveDrafts(id: string, input: { note: unknown; programme: unknown }, actor: string): Promise<void> {
     return this.in(async () => {
       const row = await this.row(id, true);
       this.requireEditable(row);
@@ -432,7 +432,7 @@ export class Service {
 
   // ---------------------------------------------------------------- approval gate (R3)
 
-  approve(id: string, practitioner: string): Promise<{ hash: string }> {
+  async approve(id: string, practitioner: string): Promise<{ hash: string }> {
     return this.in(async () => {
       const row = await this.row(id, true);
       if (row.status === "approved") throw new DomainError("invalid_state", "Already approved");
@@ -471,7 +471,7 @@ export class Service {
   // ---------------------------------------------------------------- patient link (R6) and check-ins (R8)
 
   /** Returns the raw token once. Only its hash is stored. Creating a link revokes earlier ones. */
-  createPatientLink(id: string, actor: string, ttlDays = DEFAULT_LINK_DAYS): Promise<{ token: string; expiresAt: string }> {
+  async createPatientLink(id: string, actor: string, ttlDays = DEFAULT_LINK_DAYS): Promise<{ token: string; expiresAt: string }> {
     return this.in(async () => {
       const { approval } = await this.requireApproval(id);
       const programme = JSON.parse(approval.programme_json) as ProgrammeDraft;
@@ -489,7 +489,7 @@ export class Service {
     });
   }
 
-  revokePatientLinks(id: string, actor: string): Promise<void> {
+  async revokePatientLinks(id: string, actor: string): Promise<void> {
     return this.in(async () => {
       await this.row(id);
       const n = await this.db.run("UPDATE patient_links SET revoked_at = ? WHERE consult_id = ? AND revoked_at IS NULL", [this.ts(), id]);
@@ -574,7 +574,7 @@ export class Service {
     });
   }
 
-  approvedNoteText(id: string): Promise<string> {
+  async approvedNoteText(id: string): Promise<string> {
     return this.in(async () => {
       const { row, approval } = await this.requireApproval(id);
       return this.noteTextOf(row, approval);
@@ -658,7 +658,7 @@ export class Service {
   }
 
   /** A person checked the practice system after an uncertain attempt and says what they found. */
-  resolveWriteback(id: string, targetName: string, outcome: "written" | "not_written", actor: string, externalId?: string): Promise<void> {
+  async resolveWriteback(id: string, targetName: string, outcome: "written" | "not_written", actor: string, externalId?: string): Promise<void> {
     return this.in(async () => {
       const { approval } = await this.requireApproval(id);
       const key = this.writebackKey(id, approval.content_hash, targetName);

@@ -198,7 +198,13 @@ export async function clinicOf(db: Db, kind: ClinicKey, value: string): Promise<
 }
 
 export function createPool(url: string, max = 10): pg.Pool {
-  return new pg.Pool({ connectionString: url, max, options: "-c TimeZone=UTC" });
+  const pool = new pg.Pool({ connectionString: url, max, options: "-c TimeZone=UTC" });
+  // An idle connection can be dropped by the server (restart, failover). Without a listener that would crash the
+  // process; the pool discards the dead connection and opens a new one on the next request.
+  pool.on("error", (err) => {
+    console.error("Idle database connection lost:", err.message);
+  });
+  return pool;
 }
 
 const globalForDb = globalThis as unknown as { __fettleDb?: Db };

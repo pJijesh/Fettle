@@ -48,11 +48,11 @@ export class Notifier {
     return `${this.baseUrl()}/offer/${makeLink("offer", offerId)}`;
   }
 
-  private pendingForms(appointmentId: string): Promise<{ id: string; name: string }[]> {
+  private async pendingForms(appointmentId: string): Promise<{ id: string; name: string }[]> {
     return this.db.all<{ id: string; name: string }>("SELECT id, form_name AS name FROM form_requests WHERE appointment_id = ? AND status = 'pending' ORDER BY created_at, seq", [appointmentId]);
   }
 
-  confirmation(clinicId: string, a: AppointmentView): Promise<void> {
+  async confirmation(clinicId: string, a: AppointmentView): Promise<void> {
     return this.db.scope(clinicId, () => this.confirmationNow(clinicId, a));
   }
 
@@ -75,7 +75,7 @@ export class Notifier {
     await this.outbox.queue({ clinicId, channel: "email", to: x.patient.email, subject: `Your appointment on ${when}`, body: lines.join("\n"), kind: "confirmation", key: `confirm:${a.id}:${a.startAt}` });
   }
 
-  reminder(clinicId: string, a: AppointmentView): Promise<void> {
+  async reminder(clinicId: string, a: AppointmentView): Promise<void> {
     return this.db.scope(clinicId, () => this.reminderNow(clinicId, a));
   }
 
@@ -99,7 +99,7 @@ export class Notifier {
     }
   }
 
-  cancelled(clinicId: string, a: AppointmentView, byPatient: boolean): Promise<void> {
+  async cancelled(clinicId: string, a: AppointmentView, byPatient: boolean): Promise<void> {
     return this.db.scope(clinicId, () => this.cancelledNow(clinicId, a, byPatient));
   }
 
@@ -113,7 +113,7 @@ export class Notifier {
     await this.outbox.queue({ clinicId, channel: "email", to: x.patient.email, subject: `Appointment cancelled: ${when}`, body, kind: "cancellation", key: `cancel:${a.id}` });
   }
 
-  moved(clinicId: string, a: AppointmentView, previousStartAt: string): Promise<void> {
+  async moved(clinicId: string, a: AppointmentView, previousStartAt: string): Promise<void> {
     return this.db.scope(clinicId, () => this.movedNow(clinicId, a, previousStartAt));
   }
 
@@ -129,7 +129,7 @@ export class Notifier {
     });
   }
 
-  offer(clinicId: string, o: { id: string; patientId: string; typeName: string; startAt: string; expiresAt: string }): Promise<boolean> {
+  async offer(clinicId: string, o: { id: string; patientId: string; typeName: string; startAt: string; expiresAt: string }): Promise<boolean> {
     return this.db.scope(clinicId, () => this.offerNow(clinicId, o));
   }
 
@@ -153,7 +153,7 @@ export class Notifier {
     return sent;
   }
 
-  portalCode(clinicId: string, patientId: string, code: string): Promise<void> {
+  async portalCode(clinicId: string, patientId: string, code: string): Promise<void> {
     return this.db.scope(clinicId, () => this.portalCodeNow(clinicId, patientId, code));
   }
 

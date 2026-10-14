@@ -128,7 +128,7 @@ export class Scheduling {
 
   // ---------------------------------------------------------------- clinic
 
-  clinic(clinicId: string): Promise<Clinic> {
+  async clinic(clinicId: string): Promise<Clinic> {
     return this.db.scope(clinicId, async () => {
       const r = await this.db.get<Clinic>("SELECT id, name, slug, timezone FROM clinics WHERE id = ?", [clinicId]);
       if (!r) throw new DomainError("not_found", "Clinic not found");
@@ -146,7 +146,7 @@ export class Scheduling {
     return this.db.system(async () => (await this.db.all<{ id: string }>("SELECT id FROM clinics ORDER BY created_at")).map((r) => r.id));
   }
 
-  clinicians(clinicId: string): Promise<{ id: string; name: string }[]> {
+  async clinicians(clinicId: string): Promise<{ id: string; name: string }[]> {
     return this.db.scope(clinicId, () =>
       this.db.all<{ id: string; name: string }>("SELECT id, name FROM users WHERE clinic_id = ? AND active = 1 AND role IN ('clinician','owner') ORDER BY name", [clinicId]),
     );
@@ -173,7 +173,7 @@ export class Scheduling {
     return issues;
   }
 
-  createPatient(clinicId: string, by: string, input: PatientInput): Promise<string> {
+  async createPatient(clinicId: string, by: string, input: PatientInput): Promise<string> {
     const issues = this.patientIssues(input);
     if (issues.length) throw new DomainError("validation", "Check the patient's details", issues);
     return this.db.scope(clinicId, async () => {
@@ -213,7 +213,7 @@ export class Scheduling {
     };
   }
 
-  getPatient(clinicId: string, id: string): Promise<Patient> {
+  async getPatient(clinicId: string, id: string): Promise<Patient> {
     return this.db.scope(clinicId, async () => {
       const r = await this.db.get("SELECT * FROM patients WHERE id = ? AND clinic_id = ?", [id, clinicId]);
       if (!r) throw new DomainError("not_found", "Patient not found");
@@ -222,7 +222,7 @@ export class Scheduling {
   }
 
   /** Reading a record is itself recorded. */
-  viewPatient(clinicId: string, by: string, id: string): Promise<Patient> {
+  async viewPatient(clinicId: string, by: string, id: string): Promise<Patient> {
     return this.db.scope(clinicId, async () => {
       const p = await this.getPatient(clinicId, id);
       await this.audit(clinicId, by, "patient.viewed", "patient", { patientId: id });
@@ -230,7 +230,7 @@ export class Scheduling {
     });
   }
 
-  updatePatient(clinicId: string, by: string, id: string, input: PatientInput): Promise<void> {
+  async updatePatient(clinicId: string, by: string, id: string, input: PatientInput): Promise<void> {
     return this.db.scope(clinicId, async () => {
       const existing = await this.getPatient(clinicId, id);
       if (existing.mergedInto) throw new DomainError("invalid_state", "This record was merged into another one");
@@ -252,7 +252,7 @@ export class Scheduling {
     });
   }
 
-  searchPatients(clinicId: string, q: string, limit = 25): Promise<Patient[]> {
+  async searchPatients(clinicId: string, q: string, limit = 25): Promise<Patient[]> {
     const terms = q.trim().split(/\s+/).filter(Boolean).slice(0, 4);
     const where = ["clinic_id = ?", "merged_into IS NULL"];
     const params: (string | number)[] = [clinicId];
@@ -267,7 +267,7 @@ export class Scheduling {
     );
   }
 
-  findDuplicates(clinicId: string, p: { firstName: string; lastName: string; dob?: string | null; email?: string | null }, exceptId?: string): Promise<Patient[]> {
+  async findDuplicates(clinicId: string, p: { firstName: string; lastName: string; dob?: string | null; email?: string | null }, exceptId?: string): Promise<Patient[]> {
     return this.db.scope(clinicId, async () => {
       const rows = await this.db.all(
         `SELECT * FROM patients WHERE clinic_id = ? AND merged_into IS NULL AND id <> ? AND (
@@ -281,7 +281,7 @@ export class Scheduling {
   }
 
   /** Folds `removeId` into `keepId`. Everything attached moves across; both audit trails stay. */
-  mergePatients(clinicId: string, by: string, keepId: string, removeId: string): Promise<void> {
+  async mergePatients(clinicId: string, by: string, keepId: string, removeId: string): Promise<void> {
     if (keepId === removeId) throw new DomainError("validation", "Choose two different records");
     return this.db.scope(clinicId, async () => {
       const keep = await this.getPatient(clinicId, keepId);
@@ -318,7 +318,7 @@ export class Scheduling {
     };
   }
 
-  listTypes(clinicId: string, opts: { onlyActive?: boolean; onlineOnly?: boolean } = {}): Promise<AppointmentType[]> {
+  async listTypes(clinicId: string, opts: { onlyActive?: boolean; onlineOnly?: boolean } = {}): Promise<AppointmentType[]> {
     return this.db.scope(clinicId, async () =>
       (
         await this.db.all(
@@ -329,7 +329,7 @@ export class Scheduling {
     );
   }
 
-  getType(clinicId: string, id: string): Promise<AppointmentType> {
+  async getType(clinicId: string, id: string): Promise<AppointmentType> {
     return this.db.scope(clinicId, async () => {
       const r = await this.db.get("SELECT * FROM appointment_types WHERE id = ? AND clinic_id = ?", [id, clinicId]);
       if (!r) throw new DomainError("not_found", "Appointment type not found");
@@ -371,7 +371,7 @@ export class Scheduling {
     });
   }
 
-  getHours(clinicId: string, userId: string): Promise<{ weekday: number; startMin: number; endMin: number }[]> {
+  async getHours(clinicId: string, userId: string): Promise<{ weekday: number; startMin: number; endMin: number }[]> {
     return this.db.scope(clinicId, async () =>
       (
         await this.db.all<{ weekday: number; start_min: number; end_min: number }>(
@@ -382,7 +382,7 @@ export class Scheduling {
     );
   }
 
-  setHours(clinicId: string, by: string, userId: string, rows: { weekday: number; startMin: number; endMin: number }[]): Promise<void> {
+  async setHours(clinicId: string, by: string, userId: string, rows: { weekday: number; startMin: number; endMin: number }[]): Promise<void> {
     return this.db.scope(clinicId, async () => {
       const u = await this.db.get("SELECT 1 FROM users WHERE id = ? AND clinic_id = ?", [userId, clinicId]);
       if (!u) throw new DomainError("not_found", "Staff member not found");
@@ -498,7 +498,7 @@ export class Scheduling {
     };
   }
 
-  getAppointment(clinicId: string, id: string): Promise<AppointmentView> {
+  async getAppointment(clinicId: string, id: string): Promise<AppointmentView> {
     return this.db.scope(clinicId, async () => {
       const r = await this.db.get(`${this.viewSql} WHERE a.id = ? AND a.clinic_id = ?`, [id, clinicId]);
       if (!r) throw new DomainError("not_found", "Appointment not found");
@@ -506,7 +506,7 @@ export class Scheduling {
     });
   }
 
-  listAppointments(clinicId: string, opts: { fromUtc: string; toUtc: string; userId?: string; patientId?: string; includeCancelled?: boolean }): Promise<AppointmentView[]> {
+  async listAppointments(clinicId: string, opts: { fromUtc: string; toUtc: string; userId?: string; patientId?: string; includeCancelled?: boolean }): Promise<AppointmentView[]> {
     const where = ["a.clinic_id = ?", "a.start_at < ?", "a.end_at > ?"];
     const params: string[] = [clinicId, opts.toUtc, opts.fromUtc];
     if (opts.userId) {
@@ -588,7 +588,7 @@ export class Scheduling {
   }
 
   /** Moves a booked appointment to a new start (and optionally another clinician). */
-  moveAppointment(clinicId: string, by: string, id: string, input: { startAt: string; userId?: string }): Promise<void> {
+  async moveAppointment(clinicId: string, by: string, id: string, input: { startAt: string; userId?: string }): Promise<void> {
     return this.db.scope(clinicId, async () => {
       const appt = await this.getAppointment(clinicId, id);
       if (appt.status !== "booked") throw new DomainError("invalid_state", "Only a booked appointment can be moved");
@@ -622,7 +622,7 @@ export class Scheduling {
     });
   }
 
-  cancelAppointment(clinicId: string, by: string, id: string, reason: string, opts: { byPatient?: boolean } = {}): Promise<void> {
+  async cancelAppointment(clinicId: string, by: string, id: string, reason: string, opts: { byPatient?: boolean } = {}): Promise<void> {
     return this.db.scope(clinicId, async () => {
       const appt = await this.getAppointment(clinicId, id);
       if (appt.status !== "booked" && appt.status !== "arrived") throw new DomainError("invalid_state", "This appointment cannot be cancelled");
@@ -638,7 +638,7 @@ export class Scheduling {
   }
 
   /** Arrived. Unfinished mandatory forms block it unless the person gives a reason to override. */
-  markArrived(clinicId: string, by: string, id: string, overrideReason?: string): Promise<void> {
+  async markArrived(clinicId: string, by: string, id: string, overrideReason?: string): Promise<void> {
     return this.db.scope(clinicId, async () => {
       const appt = await this.getAppointment(clinicId, id);
       if (appt.status !== "booked") throw new DomainError("invalid_state", "Only a booked appointment can be marked as arrived");
@@ -659,7 +659,7 @@ export class Scheduling {
     });
   }
 
-  markCompleted(clinicId: string, by: string, id: string): Promise<void> {
+  async markCompleted(clinicId: string, by: string, id: string): Promise<void> {
     return this.db.scope(clinicId, async () => {
       const appt = await this.getAppointment(clinicId, id);
       if (appt.status !== "arrived" && appt.status !== "booked") throw new DomainError("invalid_state", "This appointment cannot be completed");
@@ -668,7 +668,7 @@ export class Scheduling {
     });
   }
 
-  markNoShow(clinicId: string, by: string, id: string): Promise<void> {
+  async markNoShow(clinicId: string, by: string, id: string): Promise<void> {
     return this.db.scope(clinicId, async () => {
       const appt = await this.getAppointment(clinicId, id);
       if (appt.status !== "booked") throw new DomainError("invalid_state", "Only a booked appointment can be a no-show");
@@ -678,7 +678,7 @@ export class Scheduling {
     });
   }
 
-  attachConsult(clinicId: string, appointmentId: string, consultId: string): Promise<void> {
+  async attachConsult(clinicId: string, appointmentId: string, consultId: string): Promise<void> {
     return this.db.scope(clinicId, async () => {
       await this.db.run("UPDATE appointments SET consult_id = ? WHERE id = ? AND clinic_id = ?", [consultId, appointmentId, clinicId]);
     });

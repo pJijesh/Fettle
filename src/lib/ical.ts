@@ -45,7 +45,7 @@ export class Ical {
   ) {}
 
   /** Replaces any earlier link for this person. Returns the token, which cannot be recovered later. */
-  createToken(clinicId: string, userId: string): Promise<string> {
+  async createToken(clinicId: string, userId: string): Promise<string> {
     return this.db.scope(clinicId, async () => {
       const ok = await this.db.get("SELECT 1 FROM users WHERE id = ? AND clinic_id = ? AND active = 1", [userId, clinicId]);
       if (!ok) throw new DomainError("not_found", "Staff member not found");
@@ -58,13 +58,13 @@ export class Ical {
     });
   }
 
-  revoke(clinicId: string, userId: string): Promise<void> {
+  async revoke(clinicId: string, userId: string): Promise<void> {
     return this.db.scope(clinicId, async () => {
       await this.db.run("UPDATE ical_tokens SET revoked_at = ? WHERE user_id = ? AND clinic_id = ? AND revoked_at IS NULL", [this.now().toISOString(), userId, clinicId]);
     });
   }
 
-  hasActive(clinicId: string, userId: string): Promise<boolean> {
+  async hasActive(clinicId: string, userId: string): Promise<boolean> {
     return this.db.scope(clinicId, async () => Boolean(await this.db.get("SELECT 1 FROM ical_tokens WHERE user_id = ? AND revoked_at IS NULL", [userId])));
   }
 

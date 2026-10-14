@@ -368,7 +368,7 @@ export class Importer {
   }
 
   /** Removes what a batch added, within seven days. Patients who have since been given other records are kept. */
-  undo(clinicId: string, by: string, batchId: string): Promise<{ removedAppointments: number; removedPatients: number; keptPatients: number }> {
+  async undo(clinicId: string, by: string, batchId: string): Promise<{ removedAppointments: number; removedPatients: number; keptPatients: number }> {
     return this.db.scope(clinicId, async () => {
       const b = await this.db.get<{ created_at: string; undone_at: string | null }>("SELECT created_at, undone_at FROM import_batches WHERE id = ? AND clinic_id = ? FOR UPDATE", [batchId, clinicId]);
       if (!b) throw new DomainError("not_found", "Import not found");
