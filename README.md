@@ -22,13 +22,14 @@ This repository holds **Phase 0** (the consultation workflow) and **Phase 1** (t
 
 ## Run it
 
-Needs Node 22.13 or later.
+Needs Node 22.13 or later and Postgres 16 or later (Docker is the easiest way to get one locally).
 
 ```bash
 npm install
 cp .env.example .env.local     # set LINK_SECRET (and APP_BASE_URL outside localhost)
+npm run db:up                  # starts Postgres in Docker and applies db/migrations
 npm run dev                    # http://localhost:3000, goes to /setup on first run
-npm test                       # 98 tests
+npm test                       # 117 tests, against a real Postgres (see below)
 npm run typecheck
 npm run build && npm start
 ```
@@ -37,6 +38,19 @@ First run: `/setup` creates the clinic and its owner, with default appointment t
 
 A background tick runs every 30 seconds inside the app (reminders, waiting-list expiry, message delivery). To run it from an external scheduler instead, set `DISABLE_BACKGROUND_TICK=1` and `CRON_SECRET`, and call `POST /api/worker` with `Authorization: Bearer <CRON_SECRET>`.
 
+## Database
+
+Postgres holds everything. Two roles are used:
+
+| Role | Used for | Env var |
+|---|---|---|
+| Owner (for example `postgres`) | `npm run db:migrate` only: creates tables, policies and the `fettle_app` role | `DATABASE_OWNER_URL` |
+| `fettle_app` | The running app. Not a superuser, owns nothing, cannot bypass row-level security | `DATABASE_URL` |
+
+The migration creates `fettle_app` without a login. Give it one before first use: `ALTER ROLE fettle_app LOGIN PASSWORD '...'` (`npm run db:up` does this for local development through `db/dev-init.sql`). Never run the app as the owner: that would switch row-level security off.
+
+Tests need a Postgres superuser connection (`TEST_DATABASE_URL`, default `postgres://postgres@127.0.0.1:54329/postgres`; with `npm run db:up` set it to `postgres://postgres:postgres@127.0.0.1:5432/postgres`). They build one migrated template database and clone it per test, then drop the clones.
+
 ## What is real and what is not
 
 | Area | State |
@@ -44,7 +58,7 @@ A background tick runs every 30 seconds inside the app (reminders, waiting-list 
 | Consent gate, approval gate, immutable approved snapshot with hash, audit log (Phase 0) | Built and tested |
 | Diary, double-booking protection, time zones (including both clock changes) | Built and tested. Times are stored in UTC and shown in the clinic's zone (Europe/London) |
 | **Email and text sending** | **Not connected.** A development mailer accepts messages and the Outbox page lists them; nothing leaves the machine, and a banner says so on every staff page. A real provider needs a contract, a sender domain and a UK data-processing agreement, then an implementation of the `Mailer` interface in `src/lib/outbox.ts` |
-| **Tenancy** | Every query carries a clinic id and cross-clinic tests exist, but this is enforced in application code. **Postgres with row-level security in a UK region is still to do and is a gate item before a second clinic or real data** |
+| **Tenancy** | Postgres row-level security: every query runs in a transaction that names one clinic, the app connects as a role that cannot bypass the policies, and a query that forgets its `WHERE clinic_id` still sees only its own clinic (tested at the database and through the service). Patient links and tokens find their clinic through narrow lookup functions. **Not yet done: a UK-region managed database, backups and restore drills. A gate item before real data** |
 | **Import** | CSV and Excel through a column check you can correct by hand. None of the three vendors publish their column headings, so **nothing has been checked against a real Cliniko, TM3 or WriteUpp export**. **TM3's own data extraction (a `tmBase` folder) cannot be read**; a sample would be needed to build and test a reader. Treatment notes, documents, invoices and consent are not imported |
 | Drafting | **Mock provider by default** (a keyword matcher, labelled as not clinical). `AI_PROVIDER=anthropic` is available but **has not been exercised against the live API** |
 | Cliniko write-back | **Payload unverified against the live API.** Idempotent; an uncertain outcome stops at "needs check" and asks a person |
@@ -55,14 +69,14 @@ A background tick runs every 30 seconds inside the app (reminders, waiting-list 
 
 ## Checked
 
-- 98 automated tests: domain rules, accounts and second factor, clock-change days, overlap protection (service and database), concurrent booking, online booking, manage links, forms, portal codes, waiting list (first accept wins, expiry, matching), outbox idempotency and retries, reminders, calendar feed, import with dry run, column mapping, Excel and undo.
+- 117 automated tests, each in its own fresh Postgres database under the same row-level security as production: domain rules, accounts and second factor, clock-change days, overlap protection (service and database), truly concurrent booking, clinic separation (database policies and service calls), online booking, manage links, forms, portal codes, waiting list (first accept wins, expiry, matching), outbox idempotency and retries, reminders, calendar feed, import with dry run, column mapping, Excel and undo.
 - Browser walkthrough of every screen: first-run set-up and two-step sign-in, booking and portal as a patient on a phone, drag-and-drop on the calendar, role restrictions (reception cannot reach settings, consultations, import or the outbox), lock-out.
 - Automated accessibility scan (axe, WCAG 2.1 AA and best practice) on every page in light and dark, at 390 px and desktop widths, with no violations. This does not replace a manual screen-reader and keyboard review.
 
 ## Before real patients
 
 - UK/EU hosting and a data-processing agreement with every sub-processor (email and text provider, AI vendor, host).
-- Postgres with row-level security (above), backups, retention and deletion policy.
+- A UK-region managed Postgres (the schema and policies are done), backups with a tested restore, retention and deletion policy.
 - DPIA, DTAC and clinical safety (DCB0129) work, and an MHRA intended-purpose analysis.
 - Clinical review of the prompt, catalogue, starter intake form and safety wording.
 - A real email and text provider, then end-to-end tests of delivery.
@@ -71,7 +85,7 @@ A background tick runs every 30 seconds inside the app (reminders, waiting-list 
 
 ## Layout
 
-- `src/lib/db.ts`: schema, overlap triggers, in-place upgrade from the Phase 0 file.
+- `db/migrations/`: the schema, row-level security policies, the overlap constraint and the `fettle_app` role. `src/lib/db.ts`: the clinic-scoped transaction layer. `src/lib/migrate.ts`: the migration runner.
 - `src/lib/accounts.ts`, `crypto.ts`, `auth.ts`: users, sessions, two-step sign-in.
 - `src/lib/scheduling.ts`: patients, types, hours, availability, appointments, calendar markers.
 - `src/lib/forms.ts`, `booking.ts`, `waitlist.ts`, `outbox.ts`, `notify.ts`, `ical.ts`, `importer.ts`, `seed.ts`: the rest of Phase 1. `platform.ts` wires them together.

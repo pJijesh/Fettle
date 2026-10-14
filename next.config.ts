@@ -1,7 +1,8 @@
 import type { NextConfig } from "next";
 
 const config: NextConfig = {
-  // node:sqlite is a Node built-in; nothing to bundle.
+  // pg is loaded by Node at runtime rather than bundled.
+  serverExternalPackages: ["pg"],
   poweredByHeader: false,
   headers: async () => [
     {
