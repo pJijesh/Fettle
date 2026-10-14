@@ -49,7 +49,7 @@ export async function createPatientAction(_prev: ActionState, form: FormData): P
   try {
     const input = patientInput(form);
     if (!bool(form, "force") && input.firstName.trim() && input.lastName.trim()) {
-      const dup = p.scheduling.findDuplicates(user.clinicId, { firstName: input.firstName, lastName: input.lastName, dob: input.dob, email: input.email });
+      const dup = await p.scheduling.findDuplicates(user.clinicId, { firstName: input.firstName, lastName: input.lastName, dob: input.dob, email: input.email });
       if (dup.length) {
         return {
           ok: false,
@@ -57,7 +57,7 @@ export async function createPatientAction(_prev: ActionState, form: FormData): P
         };
       }
     }
-    id = p.scheduling.createPatient(user.clinicId, user.email, input);
+    id = await p.scheduling.createPatient(user.clinicId, user.email, input);
   } catch (err) {
     return fail(err);
   }
@@ -68,7 +68,7 @@ export async function updatePatientAction(_prev: ActionState, form: FormData): P
   const user = await requireUser();
   const id = field(form, "id");
   try {
-    getPlatform().scheduling.updatePatient(user.clinicId, user.email, id, patientInput(form));
+    await getPlatform().scheduling.updatePatient(user.clinicId, user.email, id, patientInput(form));
   } catch (err) {
     return fail(err);
   }
@@ -81,7 +81,7 @@ export async function mergePatientsAction(_prev: ActionState, form: FormData): P
   const keep = field(form, "keepId");
   try {
     if (form.get("confirm") !== "yes") return { ok: false, message: "Tick the box to confirm. A merge cannot be undone." };
-    getPlatform().scheduling.mergePatients(user.clinicId, user.email, keep, field(form, "removeId"));
+    await getPlatform().scheduling.mergePatients(user.clinicId, user.email, keep, field(form, "removeId"));
   } catch (err) {
     return fail(err);
   }
@@ -95,9 +95,9 @@ export async function createAppointmentAction(_prev: ActionState, form: FormData
   const p = getPlatform();
   const date = field(form, "date");
   try {
-    const tz = p.scheduling.clinic(user.clinicId).timezone;
+    const tz = (await p.scheduling.clinic(user.clinicId)).timezone;
     const startAt = localToUtc(tz, date, field(form, "time"));
-    p.scheduling.createAppointment(user.clinicId, user.email, {
+    await p.scheduling.createAppointment(user.clinicId, user.email, {
       patientId: field(form, "patientId"), userId: field(form, "userId"), typeId: field(form, "typeId"), startAt, source: "staff",
     });
   } catch (err) {
@@ -111,11 +111,11 @@ export async function moveAppointmentDragAction(id: string, date: string, minute
   const user = await requireUser();
   const p = getPlatform();
   try {
-    const tz = p.scheduling.clinic(user.clinicId).timezone;
+    const tz = (await p.scheduling.clinic(user.clinicId)).timezone;
     if (!isDate(date) || !Number.isInteger(minutes) || minutes < 0 || minutes >= 1440) throw new DomainError("validation", "Drop the appointment on a valid time");
     const d = zonedToUtc(date, minutes, tz);
     if (!d) throw new DomainError("validation", "That time does not exist because the clocks go forward then.");
-    p.scheduling.moveAppointment(user.clinicId, user.email, id, { startAt: d.toISOString(), userId });
+    await p.scheduling.moveAppointment(user.clinicId, user.email, id, { startAt: d.toISOString(), userId });
   } catch (err) {
     return fail(err);
   }
@@ -128,8 +128,8 @@ export async function rescheduleAction(_prev: ActionState, form: FormData): Prom
   const p = getPlatform();
   const id = field(form, "id");
   try {
-    const tz = p.scheduling.clinic(user.clinicId).timezone;
-    p.scheduling.moveAppointment(user.clinicId, user.email, id, { startAt: localToUtc(tz, field(form, "date"), field(form, "time")), userId: field(form, "userId") || undefined });
+    const tz = (await p.scheduling.clinic(user.clinicId)).timezone;
+    await p.scheduling.moveAppointment(user.clinicId, user.email, id, { startAt: localToUtc(tz, field(form, "date"), field(form, "time")), userId: field(form, "userId") || undefined });
   } catch (err) {
     return fail(err);
   }
@@ -141,7 +141,7 @@ export async function cancelAppointmentAction(_prev: ActionState, form: FormData
   const user = await requireUser();
   const id = field(form, "id");
   try {
-    getPlatform().scheduling.cancelAppointment(user.clinicId, user.email, id, field(form, "reason"));
+    await getPlatform().scheduling.cancelAppointment(user.clinicId, user.email, id, field(form, "reason"));
   } catch (err) {
     return fail(err);
   }
@@ -153,7 +153,7 @@ export async function arrivedAction(_prev: ActionState, form: FormData): Promise
   const user = await requireUser();
   const id = field(form, "id");
   try {
-    getPlatform().scheduling.markArrived(user.clinicId, user.email, id, field(form, "override") || undefined);
+    await getPlatform().scheduling.markArrived(user.clinicId, user.email, id, field(form, "override") || undefined);
   } catch (err) {
     return fail(err);
   }
@@ -165,7 +165,7 @@ export async function completedAction(_prev: ActionState, form: FormData): Promi
   const user = await requireUser();
   const id = field(form, "id");
   try {
-    getPlatform().scheduling.markCompleted(user.clinicId, user.email, id);
+    await getPlatform().scheduling.markCompleted(user.clinicId, user.email, id);
   } catch (err) {
     return fail(err);
   }
@@ -177,7 +177,7 @@ export async function noShowAction(_prev: ActionState, form: FormData): Promise<
   const user = await requireUser();
   const id = field(form, "id");
   try {
-    getPlatform().scheduling.markNoShow(user.clinicId, user.email, id);
+    await getPlatform().scheduling.markNoShow(user.clinicId, user.email, id);
   } catch (err) {
     return fail(err);
   }
@@ -191,15 +191,15 @@ export async function startConsultationAction(_prev: ActionState, form: FormData
   const p = getPlatform();
   let consultId: string;
   try {
-    const a = p.scheduling.getAppointment(user.clinicId, field(form, "id"));
+    const a = await p.scheduling.getAppointment(user.clinicId, field(form, "id"));
     if (a.consultId) consultId = a.consultId;
     else {
-      const patient = p.scheduling.getPatient(user.clinicId, a.patientId);
-      consultId = getService(user.clinicId).createConsult(
+      const patient = await p.scheduling.getPatient(user.clinicId, a.patientId);
+      consultId = await getService(user.clinicId).createConsult(
         { patientLabel: `${patient.firstName} ${patient.lastName}`.slice(0, 80), practitioner: a.clinicianName, patientId: a.patientId, appointmentId: a.id },
         user.email,
       );
-      p.scheduling.attachConsult(user.clinicId, a.id, consultId);
+      await p.scheduling.attachConsult(user.clinicId, a.id, consultId);
     }
   } catch (err) {
     return fail(err);
@@ -212,7 +212,7 @@ export async function startConsultationAction(_prev: ActionState, form: FormData
 export async function addWaitlistAction(_prev: ActionState, form: FormData): Promise<ActionState> {
   const user = await requireUser();
   try {
-    getPlatform().waitlist.add(user.clinicId, user.email, {
+    await getPlatform().waitlist.add(user.clinicId, user.email, {
       patientId: field(form, "patientId"), typeId: field(form, "typeId"), userId: field(form, "userId") || null,
       earliestDate: field(form, "earliestDate"), latestDate: field(form, "latestDate"),
       weekdays: form.getAll("weekdays").map((v) => Number(v)),
@@ -228,7 +228,7 @@ export async function addWaitlistAction(_prev: ActionState, form: FormData): Pro
 export async function removeWaitlistAction(_prev: ActionState, form: FormData): Promise<ActionState> {
   const user = await requireUser();
   try {
-    getPlatform().waitlist.remove(user.clinicId, user.email, field(form, "id"));
+    await getPlatform().waitlist.remove(user.clinicId, user.email, field(form, "id"));
   } catch (err) {
     return fail(err);
   }
@@ -241,7 +241,7 @@ export async function removeWaitlistAction(_prev: ActionState, form: FormData): 
 export async function saveTypeAction(_prev: ActionState, form: FormData): Promise<ActionState> {
   const user = await requireUser(["owner"]);
   try {
-    getPlatform().scheduling.saveType(user.clinicId, user.email, {
+    await getPlatform().scheduling.saveType(user.clinicId, user.email, {
       id: field(form, "id") || undefined, name: field(form, "name"), durationMin: Number(field(form, "durationMin")), bufferMin: Number(field(form, "bufferMin") || 0),
       onlineBookable: bool(form, "onlineBookable"), colour: field(form, "colour"), active: field(form, "id") ? bool(form, "active") : true,
     });
@@ -270,7 +270,7 @@ export async function saveHoursAction(_prev: ActionState, form: FormData): Promi
       }
     }
     if (issues.length) throw new DomainError("validation", "Check the working hours", issues);
-    getPlatform().scheduling.setHours(user.clinicId, user.email, userId, rows);
+    await getPlatform().scheduling.setHours(user.clinicId, user.email, userId, rows);
   } catch (err) {
     return fail(err);
   }
@@ -282,7 +282,7 @@ const DAYS = ["Monday", "Tuesday", "Wednesday", "Thursday", "Friday", "Saturday"
 export async function createUserAction(_prev: ActionState, form: FormData): Promise<ActionState> {
   const user = await requireUser(["owner"]);
   try {
-    getPlatform().accounts.createUser(user, { name: field(form, "name"), email: field(form, "email"), password: field(form, "password"), role: field(form, "role") as "owner" | "clinician" | "reception" });
+    await getPlatform().accounts.createUser(user, { name: field(form, "name"), email: field(form, "email"), password: field(form, "password"), role: field(form, "role") as "owner" | "clinician" | "reception" });
   } catch (err) {
     return fail(err);
   }
@@ -293,7 +293,7 @@ export async function createUserAction(_prev: ActionState, form: FormData): Prom
 export async function deactivateUserAction(_prev: ActionState, form: FormData): Promise<ActionState> {
   const user = await requireUser(["owner"]);
   try {
-    getPlatform().accounts.deactivateUser(user, field(form, "id"));
+    await getPlatform().accounts.deactivateUser(user, field(form, "id"));
   } catch (err) {
     return fail(err);
   }
@@ -304,7 +304,7 @@ export async function deactivateUserAction(_prev: ActionState, form: FormData): 
 export async function resetPasswordAction(_prev: ActionState, form: FormData): Promise<ActionState> {
   const user = await requireUser(["owner"]);
   try {
-    getPlatform().accounts.resetPassword(user, field(form, "id"), field(form, "password"));
+    await getPlatform().accounts.resetPassword(user, field(form, "id"), field(form, "password"));
   } catch (err) {
     return fail(err);
   }
@@ -315,7 +315,7 @@ export async function icalCreateAction(_prev: ActionState, form: FormData): Prom
   const user = await requireUser(["owner", "clinician"]);
   const target = user.role === "owner" && field(form, "userId") ? field(form, "userId") : user.id;
   try {
-    const token = getPlatform().ical.createToken(user.clinicId, target);
+    const token = await getPlatform().ical.createToken(user.clinicId, target);
     revalidatePath("/settings");
     return { ok: true, url: `${await baseUrl()}/api/ical/${token}`, message: "Calendar link made." };
   } catch (err) {
@@ -326,7 +326,7 @@ export async function icalCreateAction(_prev: ActionState, form: FormData): Prom
 export async function icalRevokeAction(_prev: ActionState, form: FormData): Promise<ActionState> {
   const user = await requireUser(["owner", "clinician"]);
   const target = user.role === "owner" && field(form, "userId") ? field(form, "userId") : user.id;
-  getPlatform().ical.revoke(user.clinicId, target);
+  await getPlatform().ical.revoke(user.clinicId, target);
   revalidatePath("/settings");
   return { ok: true, message: "Calendar link stopped." };
 }
@@ -334,7 +334,7 @@ export async function icalRevokeAction(_prev: ActionState, form: FormData): Prom
 export async function saveFormAction(_prev: ActionState, form: FormData): Promise<ActionState> {
   const user = await requireUser(["owner"]);
   try {
-    getPlatform().forms.save(user.clinicId, user.email, {
+    await getPlatform().forms.save(user.clinicId, user.email, {
       id: field(form, "id") || undefined, name: field(form, "name"), kind: field(form, "kind") === "consent" ? "consent" : "intake",
       fieldsJson: field(form, "fields"), mandatory: bool(form, "mandatory"), active: bool(form, "active"),
     });
@@ -358,7 +358,7 @@ export async function importAction(_prev: ActionState, form: FormData): Promise<
     // The person's corrections: one "map:<column number>" entry per column, holding a field name or nothing.
     const hasMapping = [...form.keys()].some((k) => k.startsWith("map:"));
     const mapping = hasMapping ? (rows[0] ?? []).map((_, i) => field(form, `map:${i}`) || null) : undefined;
-    const report = getPlatform().importer.run(user.clinicId, user.email, {
+    const report = await getPlatform().importer.run(user.clinicId, user.email, {
       kind: field(form, "kind") as ImportKind, source: field(form, "source") as ImportSource, filename: file.name, rows, mapping, dryRun,
     });
     revalidatePath("/settings/import");
@@ -372,7 +372,7 @@ export async function importAction(_prev: ActionState, form: FormData): Promise<
 export async function undoImportAction(_prev: ActionState, form: FormData): Promise<ActionState> {
   const user = await requireUser(["owner"]);
   try {
-    const r = getPlatform().importer.undo(user.clinicId, user.email, field(form, "id"));
+    const r = await getPlatform().importer.undo(user.clinicId, user.email, field(form, "id"));
     revalidatePath("/settings/import");
     return { ok: true, message: `Undone: ${r.removedAppointments} appointments and ${r.removedPatients} patients removed${r.keptPatients ? `; ${r.keptPatients} patients were kept because they now have other records` : ""}.` };
   } catch (err) {

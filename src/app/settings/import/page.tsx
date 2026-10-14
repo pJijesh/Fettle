@@ -1,6 +1,7 @@
 import Link from "next/link";
 import { requireUser } from "@/lib/auth";
-import { getPlatform } from "@/lib/app";
+import type { SessionUser } from "@/lib/accounts";
+import { getPlatform, withClinic } from "@/lib/app";
 import { undoImportAction } from "../../actions/staff";
 import { ActionForm } from "../../Forms";
 import { Header } from "../../Header";
@@ -10,8 +11,12 @@ export const dynamic = "force-dynamic";
 
 export default async function ImportPage() {
   const user = await requireUser(["owner"]);
+  return withClinic(user.clinicId, () => ImportPageBody(user));
+}
+
+async function ImportPageBody(user: SessionUser) {
   const p = getPlatform();
-  const history = p.importer.list(user.clinicId);
+  const history = await p.importer.list(user.clinicId);
   return (
     <>
       <Header user={user} />

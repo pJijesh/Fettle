@@ -15,7 +15,7 @@ export default async function BookPage({ params, searchParams }: { params: Promi
   const { slug } = await params;
   const sp = await searchParams;
   const p = getPlatform();
-  const info = p.booking.publicInfo(slug);
+  const info = await p.booking.publicInfo(slug);
   if (!info) notFound();
   const { clinic, types, clinicians } = info;
   const type = types.find((t) => t.id === sp.type);
@@ -71,7 +71,7 @@ export default async function BookPage({ params, searchParams }: { params: Promi
 
   let slots: { startAt: string; userName: string }[] = [];
   try {
-    slots = p.booking.availability(slug, { typeId: type.id, userId, fromDate: from, toDate: to }).slots;
+    slots = (await p.booking.availability(slug, { typeId: type.id, userId, fromDate: from, toDate: to })).slots;
   } catch {
     slots = [];
   }

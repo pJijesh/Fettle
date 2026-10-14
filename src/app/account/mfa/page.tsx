@@ -23,7 +23,7 @@ export default async function EnrolMfa() {
   }
   const token = (await sessionToken()) ?? "";
   const accounts = getAccounts();
-  const setup = accounts.pendingMfa(token) ?? accounts.beginMfa(token);
+  const setup = (await accounts.pendingMfa(token)) ?? (await accounts.beginMfa(token));
   const qr = await QRCode.toDataURL(setup.uri, { margin: 1, width: 220 });
   return (
     <main className="narrow">

@@ -1,5 +1,5 @@
 import crypto from "node:crypto";
-import type { Db } from "./db";
+import { clinicOf, type Db } from "./db";
 import { DomainError } from "./errors";
 import { randomToken, sha256 } from "./crypto";
 
@@ -45,44 +45,52 @@ export class Ical {
   ) {}
 
   /** Replaces any earlier link for this person. Returns the token, which cannot be recovered later. */
-  createToken(clinicId: string, userId: string): string {
-    const ok = this.db.prepare("SELECT 1 FROM users WHERE id = ? AND clinic_id = ? AND active = 1").get(userId, clinicId);
-    if (!ok) throw new DomainError("not_found", "Staff member not found");
-    const token = randomToken(32);
-    this.db.prepare("UPDATE ical_tokens SET revoked_at = ? WHERE user_id = ? AND revoked_at IS NULL").run(this.now().toISOString(), userId);
-    this.db
-      .prepare("INSERT INTO ical_tokens (id, clinic_id, user_id, token_hash, created_at) VALUES (?, ?, ?, ?, ?)")
-      .run(crypto.randomUUID(), clinicId, userId, sha256(token), this.now().toISOString());
-    this.db.prepare("INSERT INTO audit_log (clinic_id, actor, action, detail, at, entity) VALUES (?, ?, 'ical.link_created', ?, ?, 'user')").run(clinicId, userId, JSON.stringify({ userId }), this.now().toISOString());
-    return token;
+  createToken(clinicId: string, userId: string): Promise<string> {
+    return this.db.scope(clinicId, async () => {
+      const ok = await this.db.get("SELECT 1 FROM users WHERE id = ? AND clinic_id = ? AND active = 1", [userId, clinicId]);
+      if (!ok) throw new DomainError("not_found", "Staff member not found");
+      const token = randomToken(32);
+      const at = this.now().toISOString();
+      await this.db.run("UPDATE ical_tokens SET revoked_at = ? WHERE user_id = ? AND revoked_at IS NULL", [at, userId]);
+      await this.db.run("INSERT INTO ical_tokens (id, clinic_id, user_id, token_hash, created_at) VALUES (?, ?, ?, ?, ?)", [crypto.randomUUID(), clinicId, userId, sha256(token), at]);
+      await this.db.run("INSERT INTO audit_log (clinic_id, actor, action, detail, at, entity) VALUES (?, ?, 'ical.link_created', ?, ?, 'user')", [clinicId, userId, JSON.stringify({ userId }), at]);
+      return token;
+    });
   }
 
-  revoke(clinicId: string, userId: string) {
-    this.db.prepare("UPDATE ical_tokens SET revoked_at = ? WHERE user_id = ? AND clinic_id = ? AND revoked_at IS NULL").run(this.now().toISOString(), userId, clinicId);
+  revoke(clinicId: string, userId: string): Promise<void> {
+    return this.db.scope(clinicId, async () => {
+      await this.db.run("UPDATE ical_tokens SET revoked_at = ? WHERE user_id = ? AND clinic_id = ? AND revoked_at IS NULL", [this.now().toISOString(), userId, clinicId]);
+    });
   }
 
-  hasActive(userId: string): boolean {
-    return Boolean(this.db.prepare("SELECT 1 FROM ical_tokens WHERE user_id = ? AND revoked_at IS NULL").get(userId));
+  hasActive(clinicId: string, userId: string): Promise<boolean> {
+    return this.db.scope(clinicId, async () => Boolean(await this.db.get("SELECT 1 FROM ical_tokens WHERE user_id = ? AND revoked_at IS NULL", [userId])));
   }
 
-  feed(token: string): string | null {
+  /** The feed URL carries only a secret token, so the clinic is found from the token's hash first. */
+  async feed(token: string): Promise<string | null> {
     if (!token || token.length > 100) return null;
-    const t = this.db.prepare("SELECT clinic_id, user_id FROM ical_tokens WHERE token_hash = ? AND revoked_at IS NULL").get(sha256(token)) as
-      | { clinic_id: string; user_id: string }
-      | undefined;
+    const hash = sha256(token);
+    const clinicId = await clinicOf(this.db, "ical_token", hash);
+    if (!clinicId) return null;
+    return this.db.scope(clinicId, () => this.feedFor(hash));
+  }
+
+  private async feedFor(hash: string): Promise<string | null> {
+    const t = await this.db.get<{ clinic_id: string; user_id: string }>("SELECT clinic_id, user_id FROM ical_tokens WHERE token_hash = ? AND revoked_at IS NULL", [hash]);
     if (!t) return null;
-    const user = this.db.prepare("SELECT name, active FROM users WHERE id = ?").get(t.user_id) as { name: string; active: number };
+    const user = (await this.db.get<{ name: string; active: number }>("SELECT name, active FROM users WHERE id = ?", [t.user_id]))!;
     if (!user.active) return null;
-    const clinic = this.db.prepare("SELECT name FROM clinics WHERE id = ?").get(t.clinic_id) as { name: string };
+    const clinic = (await this.db.get<{ name: string }>("SELECT name FROM clinics WHERE id = ?", [t.clinic_id]))!;
     const from = new Date(this.now().getTime() - 30 * 86_400_000).toISOString();
     const to = new Date(this.now().getTime() + 180 * 86_400_000).toISOString();
-    const rows = this.db
-      .prepare(
-        `SELECT a.id, a.start_at, a.end_at, a.status, a.updated_at, p.first_name, p.last_name, ty.name AS type_name
-         FROM appointments a JOIN patients p ON p.id = a.patient_id JOIN appointment_types ty ON ty.id = a.type_id
-         WHERE a.user_id = ? AND a.clinic_id = ? AND a.status <> 'cancelled' AND a.start_at < ? AND a.end_at > ? ORDER BY a.start_at`,
-      )
-      .all(t.user_id, t.clinic_id, to, from) as unknown as { id: string; start_at: string; end_at: string; status: string; updated_at: string; first_name: string; last_name: string; type_name: string }[];
+    const rows = await this.db.all<{ id: string; start_at: string; end_at: string; status: string; updated_at: string; first_name: string; last_name: string; type_name: string }>(
+      `SELECT a.id, a.start_at, a.end_at, a.status, a.updated_at, p.first_name, p.last_name, ty.name AS type_name
+       FROM appointments a JOIN patients p ON p.id = a.patient_id JOIN appointment_types ty ON ty.id = a.type_id
+       WHERE a.user_id = ? AND a.clinic_id = ? AND a.status <> 'cancelled' AND a.start_at < ? AND a.end_at > ? ORDER BY a.start_at`,
+      [t.user_id, t.clinic_id, to, from],
+    );
     const lines = [
       "BEGIN:VCALENDAR",
       "VERSION:2.0",

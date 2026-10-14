@@ -1,14 +1,19 @@
 import Link from "next/link";
 import { requireUser } from "@/lib/auth";
-import { getPlatform } from "@/lib/app";
+import type { SessionUser } from "@/lib/accounts";
+import { getPlatform, withClinic } from "@/lib/app";
 import { Header } from "../../Header";
 
 export const dynamic = "force-dynamic";
 
 export default async function OutboxPage() {
   const user = await requireUser(["owner"]);
+  return withClinic(user.clinicId, () => OutboxPageBody(user));
+}
+
+async function OutboxPageBody(user: SessionUser) {
   const p = getPlatform();
-  const rows = p.outbox.list(user.clinicId, 100);
+  const rows = await p.outbox.list(user.clinicId, 100);
   return (
     <>
       <Header user={user} />

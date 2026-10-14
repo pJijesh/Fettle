@@ -13,7 +13,7 @@ export async function createConsultAction(_prev: ActionState, form: FormData): P
   const user = await requireUser();
   let id: string;
   try {
-    id = getService(user.clinicId).createConsult(
+    id = await getService(user.clinicId).createConsult(
       { patientLabel: field(form, "patientLabel"), practitioner: field(form, "practitioner"), pmsPatientId: field(form, "pmsPatientId") },
       user.name,
     );
@@ -30,7 +30,7 @@ export async function recordConsentAction(_prev: ActionState, form: FormData): P
     if (form.get("confirm") !== "yes") {
       return { ok: false, message: "Tick the box to confirm the patient has agreed." };
     }
-    getService(user.clinicId).recordConsent(id, { method: field(form, "method"), by: user.name }, user.name);
+    await getService(user.clinicId).recordConsent(id, { method: field(form, "method"), by: user.name }, user.name);
   } catch (err) {
     return fail(err);
   }
@@ -42,7 +42,7 @@ export async function withdrawConsentAction(_prev: ActionState, form: FormData):
   const user = await requireUser();
   const id = field(form, "id");
   try {
-    getService(user.clinicId).withdrawConsent(id, user.name);
+    await getService(user.clinicId).withdrawConsent(id, user.name);
   } catch (err) {
     return fail(err);
   }
@@ -54,7 +54,7 @@ export async function saveTranscriptAction(_prev: ActionState, form: FormData): 
   const user = await requireUser();
   const id = field(form, "id");
   try {
-    getService(user.clinicId).saveTranscript(id, field(form, "transcript"), user.name);
+    await getService(user.clinicId).saveTranscript(id, field(form, "transcript"), user.name);
   } catch (err) {
     return fail(err);
   }
@@ -68,7 +68,7 @@ export async function generateDraftsAction(_prev: ActionState, form: FormData): 
   try {
     const svc = getService(user.clinicId);
     // Save what is on screen first so the draft is made from exactly that text.
-    if (form.has("transcript")) svc.saveTranscript(id, field(form, "transcript"), user.name);
+    if (form.has("transcript")) await svc.saveTranscript(id, field(form, "transcript"), user.name);
     const { dropped } = await svc.generateDrafts(id, user.name);
     revalidatePath(`/consults/${id}`);
     return {
@@ -86,7 +86,7 @@ export async function setPatientIdAction(_prev: ActionState, form: FormData): Pr
   const user = await requireUser();
   const id = field(form, "id");
   try {
-    getService(user.clinicId).setPmsPatientId(id, field(form, "pmsPatientId"), user.name);
+    await getService(user.clinicId).setPmsPatientId(id, field(form, "pmsPatientId"), user.name);
   } catch (err) {
     return fail(err);
   }
@@ -106,7 +106,7 @@ function parseDrafts(json: string): { note: unknown; programme: unknown } {
 export async function saveDraftsAction(id: string, json: string): Promise<ActionState> {
   const user = await requireUser();
   try {
-    getService(user.clinicId).saveDrafts(id, parseDrafts(json), user.name);
+    await getService(user.clinicId).saveDrafts(id, parseDrafts(json), user.name);
   } catch (err) {
     return fail(err);
   }
@@ -119,8 +119,8 @@ export async function approveAction(id: string, json: string): Promise<ActionSta
   const user = await requireUser();
   try {
     const svc = getService(user.clinicId);
-    svc.saveDrafts(id, parseDrafts(json), user.name);
-    svc.approve(id, user.name);
+    await svc.saveDrafts(id, parseDrafts(json), user.name);
+    await svc.approve(id, user.name);
   } catch (err) {
     return fail(err);
   }
@@ -134,7 +134,7 @@ export async function createLinkAction(_prev: ActionState, form: FormData): Prom
   const user = await requireUser();
   const id = field(form, "id");
   try {
-    const { token, expiresAt } = getService(user.clinicId).createPatientLink(id, user.name);
+    const { token, expiresAt } = await getService(user.clinicId).createPatientLink(id, user.name);
     revalidatePath(`/consults/${id}`);
     return { ok: true, url: `${await baseUrl()}/p/${token}`, expiresAt };
   } catch (err) {
@@ -146,7 +146,7 @@ export async function revokeLinksAction(_prev: ActionState, form: FormData): Pro
   const user = await requireUser();
   const id = field(form, "id");
   try {
-    getService(user.clinicId).revokePatientLinks(id, user.name);
+    await getService(user.clinicId).revokePatientLinks(id, user.name);
   } catch (err) {
     return fail(err);
   }
@@ -174,7 +174,7 @@ export async function resolveWritebackAction(_prev: ActionState, form: FormData)
   const outcome = field(form, "outcome");
   try {
     if (outcome !== "written" && outcome !== "not_written") return { ok: false, message: "Choose what you found." };
-    getService(user.clinicId).resolveWriteback(id, field(form, "target"), outcome, user.name, field(form, "externalId"));
+    await getService(user.clinicId).resolveWriteback(id, field(form, "target"), outcome, user.name, field(form, "externalId"));
   } catch (err) {
     return fail(err);
   }
@@ -186,7 +186,7 @@ export async function resolveWritebackAction(_prev: ActionState, form: FormData)
 
 export async function checkInAction(_prev: ActionState, form: FormData): Promise<ActionState> {
   try {
-    getPublicService().submitCheckIn(field(form, "token"), {
+    await getPublicService().submitCheckIn(field(form, "token"), {
       adherence: field(form, "adherence"),
       painChange: field(form, "painChange"),
       comment: field(form, "comment"),

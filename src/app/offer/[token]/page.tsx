@@ -10,7 +10,7 @@ export const metadata: Metadata = { title: "An earlier appointment", robots: { i
 
 export default async function OfferPage({ params }: { params: Promise<{ token: string }> }) {
   const { token } = await params;
-  const o = getPlatform().waitlist.offerByToken(token);
+  const o = await getPlatform().waitlist.offerByToken(token);
   if (!o) return <PublicShell clinicName="Appointment"><h1>This link is not valid</h1><p>Please check the link in your message, or phone the clinic.</p></PublicShell>;
   const when = formatLocal(o.startAt, o.timezone);
   return (

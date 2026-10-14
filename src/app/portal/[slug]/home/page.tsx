@@ -14,11 +14,11 @@ export const metadata: Metadata = { title: "Your appointments", robots: { index:
 export default async function PortalHome({ params }: { params: Promise<{ slug: string }> }) {
   const { slug } = await params;
   const p = getPlatform();
-  const clinic = p.scheduling.clinicBySlug(slug);
+  const clinic = await p.scheduling.clinicBySlug(slug);
   if (!clinic) notFound();
-  const session = p.booking.portalSession((await cookies()).get(PORTAL_COOKIE)?.value);
+  const session = await p.booking.portalSession((await cookies()).get(PORTAL_COOKIE)?.value);
   if (!session || session.clinicId !== clinic.id) redirect(`/portal/${slug}`);
-  const home = p.booking.portalHome(session);
+  const home = await p.booking.portalHome(session);
   const tz = clinic.timezone;
   return (
     <PublicShell clinicName={clinic.name}>

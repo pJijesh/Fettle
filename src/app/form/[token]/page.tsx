@@ -12,7 +12,7 @@ export default async function FormPage({ params }: { params: Promise<{ token: st
   const { token } = await params;
   let v;
   try {
-    v = getPlatform().booking.formByToken(token);
+    v = await getPlatform().booking.formByToken(token);
   } catch (err) {
     if (err instanceof DomainError) {
       return <PublicShell clinicName="Form"><h1>This link is not valid</h1><p>Please check the link in your email, or phone the clinic.</p></PublicShell>;

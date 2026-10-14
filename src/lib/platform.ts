@@ -25,47 +25,66 @@ export function createPlatform(db: Db, opts: { now?: () => Date; baseUrl?: () =>
   const ical = new Ical(db, now);
   const importer = new Importer(db, scheduling, now);
 
-  const clinicOf = (appointmentId: string) =>
-    (db.prepare("SELECT clinic_id FROM appointments WHERE id = ?").get(appointmentId) as { clinic_id: string }).clinic_id;
-
+  // Hooks run inside the transaction of the booking, move or cancellation that triggered them, so the
+  // appointment, its intake forms, its message and any waiting-list offers are saved together or not at all.
   scheduling.setHooks({
-    afterBooked: (a) => {
-      const clinicId = clinicOf(a.id);
-      forms.requestForAppointment(a, clinicId);
-      notifier.confirmation(clinicId, a);
+    afterBooked: async (a) => {
+      const clinicId = await clinicIdOf(a.id);
+      await forms.requestForAppointment(a, clinicId);
+      await notifier.confirmation(clinicId, a);
     },
-    afterCancelled: (a, byPatient) => notifier.cancelled(clinicOf(a.id), a, byPatient),
-    afterMoved: (a, prev) => notifier.moved(clinicOf(a.id), a, prev),
-    slotFreed: (slot) => {
-      waitlist.offerSlot(slot);
-    },
+    afterCancelled: async (a, byPatient) => notifier.cancelled(await clinicIdOf(a.id), a, byPatient),
+    afterMoved: async (a, prev) => notifier.moved(await clinicIdOf(a.id), a, prev),
+    slotFreed: (slot) => waitlist.offerSlot(slot),
   });
 
-  /** Reminders go 24 hours ahead. A booking made inside that window already got its confirmation, so it gets no reminder. */
-  function queueReminders(): number {
-    const t = now();
-    const rows = db
-      .prepare(
-        `SELECT id, clinic_id FROM appointments WHERE status = 'booked' AND start_at > ? AND start_at <= ?`,
-      )
-      .all(t.toISOString(), new Date(t.getTime() + 24 * 3_600_000).toISOString()) as unknown as { id: string; clinic_id: string }[];
-    let n = 0;
-    for (const r of rows) {
-      const a = scheduling.getAppointment(r.clinic_id, r.id);
-      const created = (db.prepare("SELECT created_at FROM appointments WHERE id = ?").get(r.id) as { created_at: string }).created_at;
-      if (new Date(created).getTime() > new Date(a.startAt).getTime() - 24 * 3_600_000) continue;
-      notifier.reminder(r.clinic_id, a);
-      n++;
-    }
-    return n;
+  /** The hooks run inside the booking's own clinic scope, so the appointment's clinic is simply that scope's. */
+  async function clinicIdOf(appointmentId: string): Promise<string> {
+    const current = db.currentClinic();
+    if (current) return current;
+    throw new Error(`No clinic scope for appointment ${appointmentId}`);
   }
 
-  /** One pass of background work. Safe to run as often as you like and from more than one place. */
+  /** Reminders go 24 hours ahead. A booking made inside that window already got its confirmation, so it gets no reminder. */
+  async function queueReminders(clinicId: string): Promise<number> {
+    return db.scope(clinicId, async () => {
+      const t = now();
+      const rows = await db.all<{ id: string; clinic_id: string; created_at: string }>(
+        `SELECT id, clinic_id, created_at FROM appointments WHERE clinic_id = ? AND status = 'booked' AND start_at > ? AND start_at <= ?`,
+        [clinicId, t.toISOString(), new Date(t.getTime() + 24 * 3_600_000).toISOString()],
+      );
+      let n = 0;
+      for (const r of rows) {
+        const a = await scheduling.getAppointment(r.clinic_id, r.id);
+        if (new Date(r.created_at).getTime() > new Date(a.startAt).getTime() - 24 * 3_600_000) continue;
+        await notifier.reminder(r.clinic_id, a);
+        n++;
+      }
+      return n;
+    });
+  }
+
+  /**
+   * One pass of background work, one clinic at a time (each in that clinic's own transaction, so a failure in
+   * one clinic cannot stop the others). Safe to run as often as you like and from more than one place.
+   */
   async function tick() {
-    const reminders = queueReminders();
-    const offers = waitlist.expireOffers();
-    const delivered = await outbox.deliverDue(mailer);
-    return { reminders, ...offers, ...delivered };
+    const total = { reminders: 0, expired: 0, reoffered: 0, sent: 0, failed: 0, errors: 0 };
+    for (const clinicId of await scheduling.clinicIds()) {
+      try {
+        total.reminders += await queueReminders(clinicId);
+        const offers = await waitlist.expireOffers(clinicId);
+        total.expired += offers.expired;
+        total.reoffered += offers.reoffered;
+        const delivered = await outbox.deliverDue(clinicId, mailer);
+        total.sent += delivered.sent;
+        total.failed += delivered.failed;
+      } catch (err) {
+        total.errors++;
+        console.error(`Background work failed for clinic ${clinicId}:`, err);
+      }
+    }
+    return total;
   }
 
   return { db, now, accounts, scheduling, forms, booking, waitlist, outbox, notifier, ical, importer, mailer, tick, baseUrl };

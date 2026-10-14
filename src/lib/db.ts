@@ -61,6 +61,15 @@ export function isOverlap(err: unknown): boolean {
   return e?.code === "23P01" && e.constraint === "appointment_overlap";
 }
 
+/**
+ * Return one of these from inside `scopeOrFail` to refuse the request while still keeping what was written
+ * so far. Used where a failed attempt must be remembered (a wrong password or code counts towards the
+ * lock-out); a plain throw would roll that count back along with everything else.
+ */
+export class Fail {
+  constructor(readonly error: Error) {}
+}
+
 export class Db {
   private als = new AsyncLocalStorage<Ctx>();
 
@@ -75,6 +84,13 @@ export class Db {
       return fn();
     }
     return this.open(clinicId, fn);
+  }
+
+  /** Like `scope`, but a returned `Fail` commits the work and then throws its error. */
+  async scopeOrFail<T>(clinicId: string, fn: () => Promise<T | Fail>): Promise<T> {
+    const r = await this.scope(clinicId, fn);
+    if (r instanceof Fail) throw r.error;
+    return r;
   }
 
   /**
@@ -159,6 +175,26 @@ export class Db {
   async close(): Promise<void> {
     await this.pool.end();
   }
+}
+
+export type ClinicKey = "appointment" | "form_request" | "offer" | "patient_link" | "portal_session" | "ical_token";
+
+const CLINIC_LOOKUP: Record<ClinicKey, string> = {
+  appointment: "clinic_of_appointment",
+  form_request: "clinic_of_form_request",
+  offer: "clinic_of_offer",
+  patient_link: "clinic_of_patient_link",
+  portal_session: "clinic_of_portal_session",
+  ical_token: "clinic_of_ical_token",
+};
+
+/**
+ * Which clinic does this patient-facing link or token belong to? Links carry no clinic, so this is asked
+ * first (through a narrow database function) and the rest of the request then runs in that clinic's scope.
+ * The caller must already have checked the link's signature or hashed the token.
+ */
+export async function clinicOf(db: Db, kind: ClinicKey, value: string): Promise<string | null> {
+  return db.system(async () => (await db.get<{ c: string | null }>(`SELECT ${CLINIC_LOOKUP[kind]}(?) AS c`, [value]))?.c ?? null);
 }
 
 export function createPool(url: string, max = 10): pg.Pool {

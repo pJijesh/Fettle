@@ -37,3 +37,11 @@ export function getAccounts(): Accounts {
 export function getPublicService(): Service {
   return getService("public");
 }
+
+/**
+ * Runs a staff page or action's reads in one transaction limited to the signed-in user's clinic, so the page
+ * sees one consistent snapshot and takes one database connection instead of one per query.
+ */
+export function withClinic<T>(clinicId: string, fn: () => Promise<T>): Promise<T> {
+  return getDb().scope(clinicId, fn);
+}

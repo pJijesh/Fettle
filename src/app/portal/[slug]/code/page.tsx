@@ -11,7 +11,7 @@ export const metadata: Metadata = { title: "Enter your code", robots: { index: f
 export default async function PortalCode({ params, searchParams }: { params: Promise<{ slug: string }>; searchParams: Promise<{ email?: string }> }) {
   const { slug } = await params;
   const { email = "" } = await searchParams;
-  const c = getPlatform().scheduling.clinicBySlug(slug);
+  const c = await getPlatform().scheduling.clinicBySlug(slug);
   if (!c) notFound();
   return (
     <PublicShell clinicName={c.name}>

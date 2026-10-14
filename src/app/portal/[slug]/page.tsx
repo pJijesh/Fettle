@@ -10,7 +10,7 @@ export const metadata: Metadata = { title: "Sign in", robots: { index: false, fo
 
 export default async function PortalSignIn({ params }: { params: Promise<{ slug: string }> }) {
   const { slug } = await params;
-  const c = getPlatform().scheduling.clinicBySlug(slug);
+  const c = await getPlatform().scheduling.clinicBySlug(slug);
   if (!c) notFound();
   return (
     <PublicShell clinicName={c.name}>

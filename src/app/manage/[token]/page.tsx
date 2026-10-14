@@ -18,7 +18,7 @@ export default async function ManagePage({ params, searchParams }: { params: Pro
   const p = getPlatform();
   let view;
   try {
-    view = p.booking.manage(token);
+    view = await p.booking.manage(token);
   } catch (err) {
     if (err instanceof DomainError) {
       return (
@@ -35,7 +35,7 @@ export default async function ManagePage({ params, searchParams }: { params: Pro
   let slots: { startAt: string }[] = [];
   if (sp.change && view.canChange) {
     const today = utcToZoned(p.now(), tz).date;
-    slots = p.booking.rescheduleSlots(token, today, addDays(today, 20)).slice(0, 60);
+    slots = (await p.booking.rescheduleSlots(token, today, addDays(today, 20))).slice(0, 60);
   }
   const byDay = new Map<string, typeof slots>();
   for (const s of slots) {

@@ -1,6 +1,7 @@
 import Link from "next/link";
 import { requireUser } from "@/lib/auth";
-import { getPlatform } from "@/lib/app";
+import type { SessionUser } from "@/lib/accounts";
+import { getPlatform, withClinic } from "@/lib/app";
 import { addDays, dayBounds, isDate, utcToZoned, weekdayOf } from "@/lib/tz";
 import { Header } from "../Header";
 import { CalendarGrid, type Block, type Column, type StripItem } from "./CalendarGrid";
@@ -15,18 +16,24 @@ const pretty = (d: string) => {
   return `${DAY[weekdayOf(d) - 1]} ${dd}/${m}/${y}`;
 };
 
-export default async function CalendarPage({ searchParams }: { searchParams: SP }) {
+type Props = { searchParams: SP };
+
+export default async function CalendarPage(props: Props) {
   const user = await requireUser();
+  return withClinic(user.clinicId, () => CalendarPageBody(props, user));
+}
+
+async function CalendarPageBody({ searchParams }: Props, user: SessionUser) {
   const sp = await searchParams;
   const p = getPlatform();
   const sched = p.scheduling;
-  const clinic = sched.clinic(user.clinicId);
+  const clinic = await sched.clinic(user.clinicId);
   const tz = clinic.timezone;
   const nowZ = utcToZoned(p.now(), tz);
   const today = nowZ.date;
   const date = sp.date && isDate(sp.date) ? sp.date : today;
   const view = sp.view === "week" ? "week" : "day";
-  const clinicians = sched.clinicians(user.clinicId);
+  const clinicians = await sched.clinicians(user.clinicId);
   const own = clinicians.find((c) => c.id === user.id);
   const chosen = sp.clinician && sp.clinician !== "all" ? clinicians.find((c) => c.id === sp.clinician) : undefined;
   // Week view needs one clinician; day view can show everyone side by side.
@@ -41,13 +48,17 @@ export default async function CalendarPage({ searchParams }: { searchParams: SP 
   const toUtc = dayBounds(to, tz).end.toISOString();
 
   const targets = view === "week" ? [{ date: null as string | null, clin: weekClin }] : dayClins.map((c) => ({ date: null as string | null, clin: c }));
-  const appts = sched.listAppointments(user.clinicId, { fromUtc, toUtc, userId: view === "week" ? weekClin?.id : chosen?.id });
-  const consultByAppt = new Set(sched.markers(user.clinicId, from, to).awaitingApproval.map((a) => a.appointmentId));
+  const appts = await sched.listAppointments(user.clinicId, { fromUtc, toUtc, userId: view === "week" ? weekClin?.id : chosen?.id });
+  const consultByAppt = new Set((await sched.markers(user.clinicId, from, to)).awaitingApproval.map((a) => a.appointmentId));
 
   const columns: Column[] = [];
+  const hoursByClin = new Map<string, Awaited<ReturnType<typeof sched.getHours>>>();
+  for (const c of new Set([weekClin, ...dayClins].filter((x): x is NonNullable<typeof x> => !!x))) {
+    hoursByClin.set(c.id, await sched.getHours(user.clinicId, c.id));
+  }
   const mk = (date: string, clin: { id: string; name: string } | undefined, title: string, sub?: string): Column | null => {
     if (!clin) return null;
-    const hours = sched.getHours(user.clinicId, clin.id).filter((h) => h.weekday === weekdayOf(date));
+    const hours = (hoursByClin.get(clin.id) ?? []).filter((h) => h.weekday === weekdayOf(date));
     const b = dayBounds(date, tz);
     const blocks: Block[] = appts
       .filter((a) => a.userId === clin.id && new Date(a.startAt) >= b.start && new Date(a.startAt) < b.end)
@@ -90,7 +101,7 @@ export default async function CalendarPage({ searchParams }: { searchParams: SP 
     }
   }
 
-  const markers = sched.markers(user.clinicId, from, to);
+  const markers = await sched.markers(user.clinicId, from, to);
   const strips: Record<string, StripItem[]> = {};
   for (const r of markers.reviewsDue) {
     (strips[r.date] ??= []).push({ kind: "review", label: `Review due: ${r.patientLabel}`, href: `/consults/${r.consultId}` });

@@ -16,7 +16,7 @@ function dose(d: { sets: number; reps: number | null; holdSeconds: number | null
 
 export default async function PatientPage({ params }: { params: Promise<{ token: string }> }) {
   const { token } = await params;
-  const view = getPublicService().getPatientView(token);
+  const view = await getPublicService().getPatientView(token);
 
   if (!view) {
     return (

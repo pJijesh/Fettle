@@ -18,9 +18,9 @@ export async function setupAction(_prev: ActionState, form: FormData): Promise<A
   try {
     const password = field(form, "password");
     if (password !== field(form, "password2")) return { ok: false, message: "The two passwords are not the same.", issues: [{ path: "password2", message: "Re-enter the same password" }] };
-    const { clinicId, userId } = p.accounts.bootstrap({ clinicName: field(form, "clinicName"), ownerName: field(form, "ownerName"), email: field(form, "email"), password });
-    seedClinic(p.db, clinicId, userId);
-    const { token } = p.accounts.login(field(form, "email"), password);
+    const { clinicId, userId } = await p.accounts.bootstrap({ clinicName: field(form, "clinicName"), ownerName: field(form, "ownerName"), email: field(form, "email"), password });
+    await seedClinic(p.db, clinicId, userId);
+    const { token } = await p.accounts.login(field(form, "email"), password);
     await setSession(token);
   } catch (err) {
     return fail(err);
@@ -36,9 +36,9 @@ export async function loginAction(_prev: ActionState, form: FormData): Promise<A
   }
   let next = "/login/mfa";
   try {
-    const { token } = getAccounts().login(email, field(form, "password"));
+    const { token } = await getAccounts().login(email, field(form, "password"));
     await setSession(token);
-    const s = getAccounts().getSession(token);
+    const s = await getAccounts().getSession(token);
     if (s && !s.mfaEnabled) next = "/account/mfa";
   } catch (err) {
     return fail(err);
@@ -51,7 +51,7 @@ export async function mfaAction(_prev: ActionState, form: FormData): Promise<Act
   const key = await clientKey();
   if (!allow(`mfa:${key}`, 20, 15 * 60_000)) return { ok: false, message: "Too many attempts. Wait 15 minutes and try again." };
   try {
-    getAccounts().verifyMfa(token ?? "", field(form, "code").replace(/\s/g, ""));
+    await getAccounts().verifyMfa(token ?? "", field(form, "code").replace(/\s/g, ""));
   } catch (err) {
     return fail(err);
   }
@@ -60,7 +60,7 @@ export async function mfaAction(_prev: ActionState, form: FormData): Promise<Act
 
 export async function logoutAction() {
   const token = await sessionToken();
-  getAccounts().logout(token);
+  await getAccounts().logout(token);
   (await cookies()).delete(SESSION_COOKIE);
   redirect("/login");
 }

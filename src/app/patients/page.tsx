@@ -1,14 +1,21 @@
 import Link from "next/link";
 import { requireUser } from "@/lib/auth";
-import { getPlatform } from "@/lib/app";
+import type { SessionUser } from "@/lib/accounts";
+import { getPlatform, withClinic } from "@/lib/app";
 import { Header } from "../Header";
 
 export const dynamic = "force-dynamic";
 
-export default async function Patients({ searchParams }: { searchParams: Promise<{ q?: string }> }) {
+type Props = { searchParams: Promise<{ q?: string }> };
+
+export default async function Patients(props: Props) {
   const user = await requireUser();
+  return withClinic(user.clinicId, () => PatientsBody(props, user));
+}
+
+async function PatientsBody({ searchParams }: Props, user: SessionUser) {
   const { q = "" } = await searchParams;
-  const list = getPlatform().scheduling.searchPatients(user.clinicId, q, 50);
+  const list = await getPlatform().scheduling.searchPatients(user.clinicId, q, 50);
   return (
     <>
       <Header user={user} />
