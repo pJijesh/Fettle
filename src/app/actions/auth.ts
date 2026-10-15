@@ -20,7 +20,8 @@ export async function setupAction(_prev: ActionState, form: FormData): Promise<A
     const password = field(form, "password");
     if (password !== field(form, "password2")) return { ok: false, message: "The two passwords are not the same.", issues: [{ path: "password2", message: "Re-enter the same password" }] };
     const { clinicId, userId } = await p.accounts.bootstrap({ clinicName: field(form, "clinicName"), ownerName: field(form, "ownerName"), email: field(form, "email"), password });
-    await seedClinic(p.db, clinicId, userId);
+    const pick = field(form, "disciplines");
+    await seedClinic(p.db, clinicId, userId, new Date(), pick === "ayurveda" || pick === "both" ? pick : "physio");
     const { token } = await p.accounts.login(field(form, "email"), password);
     await setSession(token);
   } catch (err) {

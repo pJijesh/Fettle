@@ -15,6 +15,13 @@ export default async function SetupPage() {
         <ActionForm action={setupAction} submitLabel="Create clinic">
           <label htmlFor="clinicName">Clinic name</label>
           <input id="clinicName" name="clinicName" required maxLength={80} autoComplete="organization" />
+          <label htmlFor="disciplines">What does the clinic practise?</label>
+          <select id="disciplines" name="disciplines" defaultValue="physio">
+            <option value="physio">Physiotherapy</option>
+            <option value="ayurveda">Ayurveda</option>
+            <option value="both">Physiotherapy and Ayurveda</option>
+          </select>
+          <p className="muted">You can change this later in Settings.</p>
           <label htmlFor="ownerName">Your name</label>
           <input id="ownerName" name="ownerName" required maxLength={80} autoComplete="name" />
           <label htmlFor="email">Your email</label>

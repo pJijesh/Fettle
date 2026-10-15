@@ -9,6 +9,7 @@ const idle: ActionState = {};
 
 const ROW_LABEL: [RegExp, string][] = [
   [/^programme\.items\.(\d+)/, "Exercise"],
+  [/^plan\.items\.(\d+)/, "Plan item"],
   [/^note\.rom\.(\d+)/, "Range of movement row"],
   [/^note\.outcomeMeasures\.(\d+)/, "Outcome measure"],
   [/^note\.specialTests\.(\d+)/, "Special test"],

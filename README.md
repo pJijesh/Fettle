@@ -21,6 +21,7 @@ This repository holds **Phase 0** (the consultation workflow) and **Phase 1** (t
 | Account recovery | Forgotten password: emailed single-use link, valid for an hour, same answer whether or not the address has an account; it signs the person out everywhere and does not bypass two-step sign-in. Lost phone: ten single-use recovery codes (shown once, stored hashed), or the owner can reset a colleague's two-step sign-in |
 | Reports | Appointments, seen, did-not-attend and cancellation rates, bookings by source and type, new patients, and per-clinician utilisation for any date range up to a year, in the clinic's time zone. Counts only; no patient is named |
 | Billing | A price on each appointment type; an invoice from an attended appointment in one click, or written by hand; payment recorded by method (cash, card, bank transfer, cheque, insurer) as it comes in, in part or in full; an Outstanding list; patient balance; printable invoice and credit note; revenue, collected-by-method, owed and overdue in Reports. Numbers run without gaps (`INV-000001`, credit notes `CN-000001`). Invoices, lines and payments are append-only in the database: a mistake is cancelled with a credit note (only once nothing is paid on it) and a wrong payment is reversed, and both stay on the record. VAT at one rate set in Settings. Owner and reception only |
+| Ayurveda | A clinic chooses physiotherapy, Ayurveda or both (Settings, or at setup). Each appointment type and consultation belongs to one discipline; the diary, patients, billing, patient link and check-in are shared. An Ayurvedic consultation has the same consent, approval and frozen-snapshot steps, but the practitioner writes it (no AI drafting, no transcript): history, medicines and allergies, constitution (prakriti), current imbalance (vikriti), agni and ama, examination, a safety screen, and a treatment plan of therapies, herbs, diet and daily routine. Approval needs the practitioner's qualification, the safety screen, medicines, allergies and (for herbs) instructions, duration and cautions. The patient sees the plan grouped by kind on the same no-login link |
 | Operations | `GET /api/health` reports whether the app can reach its database. Errors are logged by code and call stack only, because database messages can quote patient data |
 | E1.11 Switching import | Patients and appointments from **CSV or Excel (.xlsx)** from TM3, Cliniko, WriteUpp or anything else. Per-system export guidance, downloadable templates, and a **column check** where you choose which column goes into which field. Dry run that executes the real import and rolls it back, then confirm, then undo for 7 days. Consent is never imported |
 
@@ -33,7 +34,7 @@ npm install
 cp .env.example .env.local     # set LINK_SECRET (and APP_BASE_URL outside localhost)
 npm run db:up                  # starts Postgres in Docker and applies db/migrations
 npm run dev                    # http://localhost:3000, goes to /setup on first run
-npm test                       # 158 tests, against a real Postgres (see below)
+npm test                       # 177 tests, against a real Postgres (see below)
 npm run typecheck
 npm run build && npm start
 ```
@@ -70,11 +71,12 @@ Tests need a Postgres superuser connection (`TEST_DATABASE_URL`, default `postgr
 | Audio capture and transcription | Not built. Paste or type the transcript |
 | Exercise catalogue, intake form, default hours | Starter content. A clinical lead should review before use |
 | **Billing** | Records what was charged and paid; it does not take money. **No card payments** (a Stripe account is needed) and **no insurer claim submission** (insurer name and claim reference are recorded on the invoice, nothing is sent). One VAT rate for the whole invoice; no per-item exemptions. Whether the invoice wording meets your accountant's and any insurer's requirements has not been checked |
+| **Ayurveda content** | **Starter library not reviewed by a qualified Ayurvedic practitioner** (the app says so where it is used). It holds therapies, diet and daily routine only: **no herbs and no doses**, which the practitioner writes and owns. Intensive cleansing procedures are left out. Ayurveda is not a regulated profession in the UK; the clinic is responsible for who practises, for the legal status of any herbal product supplied, and for herb-drug interaction checks. No Ayurveda-specific intake form yet; the physio intake form is reused. Write-back to Cliniko sends the note as text |
 | Notes templates, mobile apps | Later phases (see the PRD) |
 
 ## Checked
 
-- 158 automated tests, each in its own fresh Postgres database under the same row-level security as production: domain rules, accounts and second factor, clock-change days, overlap protection (service and database), truly concurrent booking, clinic separation (database policies and service calls), online booking, manage links, forms, portal codes, waiting list (first accept wins, expiry, matching), outbox idempotency and retries, reminders, calendar feed, import with dry run, column mapping, Excel and undo.
+- 177 automated tests, each in its own fresh Postgres database under the same row-level security as production: domain rules, accounts and second factor, clock-change days, overlap protection (service and database), truly concurrent booking, clinic separation (database policies and service calls), online booking, manage links, forms, portal codes, waiting list (first accept wins, expiry, matching), outbox idempotency and retries, reminders, calendar feed, import with dry run, column mapping, Excel and undo.
 - Browser walkthrough of every screen: first-run set-up and two-step sign-in, booking and portal as a patient on a phone, drag-and-drop on the calendar, role restrictions (reception cannot reach settings, consultations, import or the outbox), lock-out.
 - Automated accessibility scan (axe, WCAG 2.1 AA and best practice) on every page in light and dark, at 390 px and desktop widths, with no violations. This does not replace a manual screen-reader and keyboard review.
 

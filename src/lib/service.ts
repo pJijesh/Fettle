@@ -14,8 +14,12 @@ import {
 } from "./schemas";
 import { approvalIssues, crossCheck, transcriptLines, type Issue } from "./validation";
 import { noteToText } from "./format";
+import { AyurvedaDraft, AyurvedaPlan, AyurvedaRecord, KIND_ORDER, emptyPlan, emptyRecord, type PlanKind } from "./ayurveda/schemas";
+import { ayurvedaApprovalIssues } from "./ayurveda/validation";
+import { ayurvedaNoteToText } from "./ayurveda/format";
 import type { WritebackTarget } from "./writeback/types";
 
+export type Discipline = "physio" | "ayurveda";
 export type Status = "created" | "consented" | "captured" | "drafted" | "approved";
 
 export { DomainError } from "./errors";
@@ -37,6 +41,7 @@ export interface Deps {
 
 interface ConsultRow {
   id: string;
+  discipline: Discipline;
   patient_label: string;
   pms_patient_id: string | null;
   practitioner: string;
@@ -79,6 +84,7 @@ export interface WritebackRow {
 
 export interface ConsultSummary {
   id: string;
+  discipline: Discipline;
   patientLabel: string;
   practitioner: string;
   status: Status;
@@ -87,6 +93,7 @@ export interface ConsultSummary {
 
 export interface ConsultView {
   id: string;
+  discipline: Discipline;
   patientLabel: string;
   pmsPatientId: string | null;
   practitioner: string;
@@ -96,20 +103,33 @@ export interface ConsultView {
   transcript: string;
   note: NoteDraft;
   programme: ProgrammeDraft;
+  /** The Ayurvedic record and plan. Set only for an Ayurveda consultation; then `note` and `programme` are empty. */
+  ayurveda: AyurvedaDraft | null;
   draftModel: string | null;
   draftedAt: string | null;
-  approval: { by: string; at: string; hash: string; note: NoteDraft; programme: ProgrammeDraft } | null;
+  approval: { by: string; at: string; hash: string; note: NoteDraft; programme: ProgrammeDraft; ayurveda: AyurvedaDraft | null } | null;
   links: { id: string; createdAt: string; expiresAt: string; revokedAt: string | null }[];
   checkIns: { id: string; adherence: string; painChange: string; comment: string; createdAt: string }[];
   writebacks: WritebackRow[];
   audit: { at: string; actor: string; action: string; detail: string | null }[];
 }
 
+export interface AyurvedaPatientPlan {
+  title: string;
+  intro: string;
+  reviewInWeeks: number | null;
+  safetyAdvice: string[];
+  groups: { kind: PlanKind; items: { name: string; instructions: string; duration: string; where: "home" | "clinic"; cautions: string }[] }[];
+}
+
 export interface PatientView {
   linkId: string;
   consultId: string;
+  discipline: Discipline;
   practitioner: string;
   approvedAt: string;
+  /** Set for an Ayurveda consultation, with `programme` empty. */
+  ayurveda: AyurvedaPatientPlan | null;
   programme: {
     title: string;
     intro: string;
@@ -198,37 +218,43 @@ export class Service {
   // ---------------------------------------------------------------- consults
 
   createConsult(
-    input: { patientLabel: string; pmsPatientId?: string; practitioner: string; patientId?: string; appointmentId?: string },
+    input: { patientLabel: string; pmsPatientId?: string; practitioner: string; patientId?: string; appointmentId?: string; discipline?: Discipline },
     actor: string,
   ): Promise<string> {
+    const discipline: Discipline = input.discipline ?? "physio";
     const patientLabel = input.patientLabel.trim();
     const practitioner = input.practitioner.trim();
     const issues: Issue[] = [];
     if (!patientLabel) issues.push({ path: "patientLabel", message: "Enter a patient name or initials" });
     if (patientLabel.length > 80) issues.push({ path: "patientLabel", message: "Keep the patient label under 80 characters" });
-    if (!practitioner) issues.push({ path: "practitioner", message: "Enter the treating physio's name" });
+    if (!practitioner) issues.push({ path: "practitioner", message: discipline === "ayurveda" ? "Enter the treating practitioner's name" : "Enter the treating physio's name" });
+    if (discipline !== "physio" && discipline !== "ayurveda") issues.push({ path: "discipline", message: "Choose physiotherapy or Ayurveda" });
     if (issues.length) throw new DomainError("validation", "Check the consultation details", issues);
 
     return this.in(async () => {
+      const clinic = await this.db.get<{ disciplines: string }>("SELECT disciplines FROM clinics WHERE id = ?", [this.clinicId]);
+      if (clinic && clinic.disciplines !== "both" && clinic.disciplines !== discipline) {
+        throw new DomainError("validation", `This clinic is not set up for ${discipline === "ayurveda" ? "Ayurveda" : "physiotherapy"}. The owner can change that in Settings.`);
+      }
       const id = crypto.randomUUID();
       const now = this.ts();
       await this.db.run(
-        `INSERT INTO consults (id, patient_label, pms_patient_id, practitioner, status, created_at, updated_at, clinic_id, patient_id, appointment_id)
-         VALUES (?, ?, ?, ?, 'created', ?, ?, ?, ?, ?)`,
-        [id, patientLabel, input.pmsPatientId?.trim() || null, practitioner, now, now, this.clinicId, input.patientId ?? null, input.appointmentId ?? null],
+        `INSERT INTO consults (id, patient_label, pms_patient_id, practitioner, status, created_at, updated_at, clinic_id, patient_id, appointment_id, discipline)
+         VALUES (?, ?, ?, ?, 'created', ?, ?, ?, ?, ?, ?)`,
+        [id, patientLabel, input.pmsPatientId?.trim() || null, practitioner, now, now, this.clinicId, input.patientId ?? null, input.appointmentId ?? null, discipline],
       );
-      await this.audit(id, actor, "consult.created");
+      await this.audit(id, actor, "consult.created", discipline === "ayurveda" ? { discipline } : undefined);
       return id;
     });
   }
 
   async listConsults(limit = 50): Promise<ConsultSummary[]> {
     return this.in(async () => {
-      const rows = await this.db.all<Pick<ConsultRow, "id" | "patient_label" | "practitioner" | "status" | "updated_at">>(
-        "SELECT id, patient_label, practitioner, status, updated_at FROM consults WHERE clinic_id = ? ORDER BY updated_at DESC LIMIT ?",
+      const rows = await this.db.all<Pick<ConsultRow, "id" | "discipline" | "patient_label" | "practitioner" | "status" | "updated_at">>(
+        "SELECT id, discipline, patient_label, practitioner, status, updated_at FROM consults WHERE clinic_id = ? ORDER BY updated_at DESC LIMIT ?",
         [this.clinicId, limit],
       );
-      return rows.map((r) => ({ id: r.id, patientLabel: r.patient_label, practitioner: r.practitioner, status: r.status, updatedAt: r.updated_at }));
+      return rows.map((r) => ({ id: r.id, discipline: r.discipline, patientLabel: r.patient_label, practitioner: r.practitioner, status: r.status, updatedAt: r.updated_at }));
     });
   }
 
@@ -251,8 +277,10 @@ export class Service {
         [id],
       );
 
+      const ayurveda = row.discipline === "ayurveda";
       return {
         id: row.id,
+        discipline: row.discipline,
         patientLabel: row.patient_label,
         pmsPatientId: row.pms_patient_id,
         practitioner: row.practitioner,
@@ -260,8 +288,11 @@ export class Service {
         consent: row.consent_at ? { at: row.consent_at, method: row.consent_method ?? "verbal", by: row.consent_recorded_by ?? "" } : null,
         consentWithdrawnAt: row.consent_withdrawn_at,
         transcript: row.transcript ?? "",
-        note: row.note_json ? (JSON.parse(row.note_json) as NoteDraft) : emptyNote(),
-        programme: row.programme_json ? (JSON.parse(row.programme_json) as ProgrammeDraft) : emptyProgramme(),
+        note: !ayurveda && row.note_json ? (JSON.parse(row.note_json) as NoteDraft) : emptyNote(),
+        programme: !ayurveda && row.programme_json ? (JSON.parse(row.programme_json) as ProgrammeDraft) : emptyProgramme(),
+        ayurveda: ayurveda
+          ? { record: row.note_json ? (JSON.parse(row.note_json) as AyurvedaRecord) : emptyRecord(), plan: row.programme_json ? (JSON.parse(row.programme_json) as AyurvedaPlan) : emptyPlan() }
+          : null,
         draftModel: row.draft_model,
         draftedAt: row.drafted_at,
         approval: approval
@@ -269,8 +300,9 @@ export class Service {
               by: approval.approved_by,
               at: approval.approved_at,
               hash: approval.content_hash,
-              note: JSON.parse(approval.note_json) as NoteDraft,
-              programme: JSON.parse(approval.programme_json) as ProgrammeDraft,
+              note: ayurveda ? emptyNote() : (JSON.parse(approval.note_json) as NoteDraft),
+              programme: ayurveda ? emptyProgramme() : (JSON.parse(approval.programme_json) as ProgrammeDraft),
+              ayurveda: ayurveda ? { record: JSON.parse(approval.note_json) as AyurvedaRecord, plan: JSON.parse(approval.programme_json) as AyurvedaPlan } : null,
             }
           : null,
         links: links.map((l) => ({ id: l.id, createdAt: l.created_at, expiresAt: l.expires_at, revokedAt: l.revoked_at })),
@@ -336,9 +368,14 @@ export class Service {
 
   // ---------------------------------------------------------------- capture and drafting (R2, R4)
 
+  private requirePhysio(row: ConsultRow) {
+    if (row.discipline !== "physio") throw new DomainError("invalid_state", "Ayurvedic consultations are written by the practitioner; there is no transcript or AI drafting");
+  }
+
   async saveTranscript(id: string, text: string, actor: string): Promise<void> {
     return this.in(async () => {
       const row = await this.row(id, true);
+      this.requirePhysio(row);
       this.requireEditable(row);
       this.requireConsent(row);
       if (text.length > MAX_TRANSCRIPT_CHARS) {
@@ -357,6 +394,7 @@ export class Service {
   async generateDrafts(id: string, actor: string, signal?: AbortSignal) {
     const input = await this.in(async () => {
       const row = await this.row(id);
+      this.requirePhysio(row);
       this.requireEditable(row);
       this.requireConsent(row);
       const lines = transcriptLines(row.transcript ?? "");
@@ -413,6 +451,7 @@ export class Service {
   async saveDrafts(id: string, input: { note: unknown; programme: unknown }, actor: string): Promise<void> {
     return this.in(async () => {
       const row = await this.row(id, true);
+      this.requirePhysio(row);
       this.requireEditable(row);
       this.requireConsent(row);
       const parsed = DraftOutput.safeParse({ note: input.note, programme: input.programme });
@@ -430,6 +469,25 @@ export class Service {
     });
   }
 
+  /** Saves the practitioner's Ayurvedic record and plan. Shape is checked here; completeness is enforced at approval. */
+  async saveAyurveda(id: string, input: { record: unknown; plan: unknown }, actor: string): Promise<void> {
+    return this.in(async () => {
+      const row = await this.row(id, true);
+      if (row.discipline !== "ayurveda") throw new DomainError("invalid_state", "This is not an Ayurvedic consultation");
+      this.requireEditable(row);
+      this.requireConsent(row);
+      const parsed = AyurvedaDraft.safeParse({ record: input.record, plan: input.plan });
+      if (!parsed.success) {
+        throw new DomainError("validation", "Some fields are not valid", parsed.error.issues.map((i) => ({ path: i.path.join("."), message: i.message })));
+      }
+      // A saved record is the practitioner's own work, so no model is named and the "unscreened" state is never assumed.
+      await this.db.run("UPDATE consults SET note_json = ?, programme_json = ?, status = 'drafted', drafted_at = COALESCE(drafted_at, ?::timestamptz), draft_model = NULL, updated_at = ? WHERE id = ?", [
+        JSON.stringify(parsed.data.record), JSON.stringify(parsed.data.plan), this.ts(), this.ts(), id,
+      ]);
+      await this.audit(id, actor, "ayurveda.saved");
+    });
+  }
+
   // ---------------------------------------------------------------- approval gate (R3)
 
   async approve(id: string, practitioner: string): Promise<{ hash: string }> {
@@ -441,20 +499,32 @@ export class Service {
       }
       this.requireConsent(row);
 
-      const note = JSON.parse(row.note_json) as NoteDraft;
-      const programme = JSON.parse(row.programme_json) as ProgrammeDraft;
-      const lineCount = transcriptLines(row.transcript ?? "").length;
-      const issues = approvalIssues({ note, programme });
-      issues.push(...crossCheck({ note, programme }, { transcriptLineCount: lineCount }).filter((i) => i.message.startsWith("Evidence line")));
-      if (issues.length) throw new DomainError("validation", "Fix these before approving", issues);
+      let note: unknown;
+      let programme: unknown;
+      if (row.discipline === "ayurveda") {
+        const parsed = AyurvedaDraft.parse({ record: JSON.parse(row.note_json), plan: JSON.parse(row.programme_json) });
+        const issues = ayurvedaApprovalIssues(parsed);
+        if (issues.length) throw new DomainError("validation", "Fix these before approving", issues);
+        note = parsed.record;
+        programme = parsed.plan;
+      } else {
+        const n = JSON.parse(row.note_json) as NoteDraft;
+        const pr = JSON.parse(row.programme_json) as ProgrammeDraft;
+        const lineCount = transcriptLines(row.transcript ?? "").length;
+        const issues = approvalIssues({ note: n, programme: pr });
+        issues.push(...crossCheck({ note: n, programme: pr }, { transcriptLineCount: lineCount }).filter((i) => i.message.startsWith("Evidence line")));
+        if (issues.length) throw new DomainError("validation", "Fix these before approving", issues);
+        note = n;
+        programme = pr;
+      }
 
-      const hash = contentHash(note, programme);
+      const hash = contentHash(note as NoteDraft, programme as ProgrammeDraft);
       const at = this.ts();
       await this.db.run("INSERT INTO approvals (id, clinic_id, consult_id, approved_by, approved_at, note_json, programme_json, content_hash) VALUES (?, ?, ?, ?, ?, ?, ?, ?)", [
         crypto.randomUUID(), this.clinicId, id, practitioner, at, JSON.stringify(note), JSON.stringify(programme), hash,
       ]);
       await this.db.run("UPDATE consults SET status = 'approved', updated_at = ? WHERE id = ?", [at, id]);
-      await this.audit(id, practitioner, "drafts.approved", { hash, aiModel: row.draft_model });
+      await this.audit(id, practitioner, row.discipline === "ayurveda" ? "ayurveda.approved" : "drafts.approved", { hash, aiModel: row.draft_model });
       return { hash };
     });
   }
@@ -463,7 +533,7 @@ export class Service {
     const row = await this.row(id);
     const approval = await this.approvalRow(id);
     if (!approval || row.status !== "approved") {
-      throw new DomainError("invalid_state", "Nothing is saved to the record or sent to a patient until the physio approves");
+      throw new DomainError("invalid_state", "Nothing is saved to the record or sent to a patient until the practitioner approves");
     }
     return { row, approval };
   }
@@ -473,9 +543,11 @@ export class Service {
   /** Returns the raw token once. Only its hash is stored. Creating a link revokes earlier ones. */
   async createPatientLink(id: string, actor: string, ttlDays = DEFAULT_LINK_DAYS): Promise<{ token: string; expiresAt: string }> {
     return this.in(async () => {
-      const { approval } = await this.requireApproval(id);
-      const programme = JSON.parse(approval.programme_json) as ProgrammeDraft;
-      if (programme.items.length === 0) throw new DomainError("invalid_state", "The approved programme has no exercises to send");
+      const { row, approval } = await this.requireApproval(id);
+      const programme = JSON.parse(approval.programme_json) as { items: unknown[] };
+      if (programme.items.length === 0) {
+        throw new DomainError("invalid_state", row.discipline === "ayurveda" ? "The approved plan has nothing to send" : "The approved programme has no exercises to send");
+      }
 
       const token = crypto.randomBytes(24).toString("base64url");
       const now = this.now();
@@ -520,14 +592,37 @@ export class Service {
   async getPatientView(token: string): Promise<PatientView | null> {
     return this.viaToken(token, async (link) => {
       const approval = await this.approvalRow(link.consult_id);
-      const row = await this.db.get<{ practitioner: string }>("SELECT practitioner FROM consults WHERE id = ?", [link.consult_id]);
+      const row = await this.db.get<{ practitioner: string; discipline: Discipline }>("SELECT practitioner, discipline FROM consults WHERE id = ?", [link.consult_id]);
       if (!approval || !row) return null;
+      if (row.discipline === "ayurveda") {
+        const plan = JSON.parse(approval.programme_json) as AyurvedaPlan;
+        return {
+          linkId: link.id,
+          consultId: link.consult_id,
+          discipline: "ayurveda" as const,
+          practitioner: row.practitioner,
+          approvedAt: approval.approved_at,
+          programme: { title: "", intro: "", reviewInWeeks: null, safetyAdvice: [], items: [] },
+          ayurveda: {
+            title: plan.title,
+            intro: plan.patientIntro,
+            reviewInWeeks: plan.reviewInWeeks,
+            safetyAdvice: plan.safetyAdvice,
+            groups: KIND_ORDER.map((kind) => ({
+              kind,
+              items: plan.items.filter((i) => i.kind === kind).map((i) => ({ name: i.name, instructions: i.instructions, duration: i.duration, where: i.where, cautions: i.cautions })),
+            })).filter((g) => g.items.length > 0),
+          },
+        };
+      }
       const programme = JSON.parse(approval.programme_json) as ProgrammeDraft;
       return {
         linkId: link.id,
         consultId: link.consult_id,
+        discipline: "physio" as const,
         practitioner: row.practitioner,
         approvedAt: approval.approved_at,
+        ayurveda: null,
         programme: {
           title: programme.title,
           intro: programme.patientIntro,
@@ -567,6 +662,12 @@ export class Service {
   // ---------------------------------------------------------------- write-back (R5) and copy-ready fallback
 
   private noteTextOf(row: ConsultRow, approval: ApprovalRow): string {
+    if (row.discipline === "ayurveda") {
+      return ayurvedaNoteToText(JSON.parse(approval.note_json) as AyurvedaRecord, JSON.parse(approval.programme_json) as AyurvedaPlan, {
+        practitioner: approval.approved_by,
+        approvedAt: approval.approved_at,
+      });
+    }
     return noteToText(JSON.parse(approval.note_json) as NoteDraft, JSON.parse(approval.programme_json) as ProgrammeDraft, {
       practitioner: approval.approved_by,
       approvedAt: approval.approved_at,
@@ -628,7 +729,7 @@ export class Service {
         wbId,
         call: {
           patientId: row.pms_patient_id,
-          title: `Physiotherapy consultation ${approval.approved_at.slice(0, 10)}`,
+          title: `${row.discipline === "ayurveda" ? "Ayurvedic" : "Physiotherapy"} consultation ${approval.approved_at.slice(0, 10)}`,
           text: this.noteTextOf(row, approval),
           practitioner: approval.approved_by,
           reference: id,

@@ -6,11 +6,15 @@ import { addDays, dayBounds, isDate, utcToZoned, weekdayOf, zonedToUtc } from ".
 export type ApptStatus = "booked" | "arrived" | "completed" | "cancelled" | "no_show";
 export type ApptSource = "staff" | "online" | "waitlist" | "import";
 
+export type Discipline = "physio" | "ayurveda";
+export type Disciplines = "physio" | "ayurveda" | "both";
+
 export interface Clinic {
   id: string;
   name: string;
   slug: string;
   timezone: string;
+  disciplines: Disciplines;
 }
 
 export interface Patient {
@@ -54,6 +58,7 @@ export interface AppointmentType {
   colour: string;
   active: boolean;
   pricePence: number;
+  discipline: Discipline;
 }
 
 export interface Slot {
@@ -131,7 +136,7 @@ export class Scheduling {
 
   async clinic(clinicId: string): Promise<Clinic> {
     return this.db.scope(clinicId, async () => {
-      const r = await this.db.get<Clinic>("SELECT id, name, slug, timezone FROM clinics WHERE id = ?", [clinicId]);
+      const r = await this.db.get<Clinic>("SELECT id, name, slug, timezone, disciplines FROM clinics WHERE id = ?", [clinicId]);
       if (!r) throw new DomainError("not_found", "Clinic not found");
       return r;
     });
@@ -139,7 +144,7 @@ export class Scheduling {
 
   /** Public: the booking and portal pages are addressed by slug. Clinic names and time zones are not private. */
   async clinicBySlug(slug: string): Promise<Clinic | null> {
-    return this.db.system(async () => (await this.db.get<Clinic>("SELECT id, name, slug, timezone FROM clinics WHERE slug = ?", [slug])) ?? null);
+    return this.db.system(async () => (await this.db.get<Clinic>("SELECT id, name, slug, timezone, disciplines FROM clinics WHERE slug = ?", [slug])) ?? null);
   }
 
   /** Every clinic, for the background worker to visit one at a time. */
@@ -317,6 +322,7 @@ export class Scheduling {
       colour: r.colour as string,
       active: !!r.active,
       pricePence: Number(r.price_pence ?? 0),
+      discipline: (r.discipline as Discipline) ?? "physio",
     };
   }
 
@@ -352,26 +358,71 @@ export class Scheduling {
   async saveType(
     clinicId: string,
     by: string,
-    input: { id?: string; name: string; durationMin: number; bufferMin: number; onlineBookable: boolean; colour: string; active?: boolean; pricePence?: number },
+    input: { id?: string; name: string; durationMin: number; bufferMin: number; onlineBookable: boolean; colour: string; active?: boolean; pricePence?: number; discipline?: Discipline },
   ): Promise<string> {
     const issues = this.typeIssues(input);
+    if (input.discipline !== undefined && input.discipline !== "physio" && input.discipline !== "ayurveda") issues.push(issue("discipline", "Choose physiotherapy or Ayurveda"));
     if (issues.length) throw new DomainError("validation", "Check the appointment type", issues);
     return this.db.scope(clinicId, async () => {
+      if (input.discipline) {
+        const c = await this.clinic(clinicId);
+        if (c.disciplines !== "both" && c.disciplines !== input.discipline) {
+          throw new DomainError("validation", "Turn that discipline on in Settings first", [issue("discipline", "This clinic is not set up for that discipline")]);
+        }
+      }
       if (input.id) {
         await this.getType(clinicId, input.id);
-        await this.db.run("UPDATE appointment_types SET name=?, duration_min=?, buffer_min=?, online_bookable=?, colour=?, active=?, price_pence=COALESCE(?, price_pence) WHERE id=? AND clinic_id=?", [
-          input.name.trim(), input.durationMin, input.bufferMin, input.onlineBookable ? 1 : 0, input.colour, input.active === false ? 0 : 1, input.pricePence ?? null, input.id, clinicId,
+        await this.db.run("UPDATE appointment_types SET name=?, duration_min=?, buffer_min=?, online_bookable=?, colour=?, active=?, price_pence=COALESCE(?, price_pence), discipline=COALESCE(?, discipline) WHERE id=? AND clinic_id=?", [
+          input.name.trim(), input.durationMin, input.bufferMin, input.onlineBookable ? 1 : 0, input.colour, input.active === false ? 0 : 1, input.pricePence ?? null, input.discipline ?? null, input.id, clinicId,
         ]);
         await this.audit(clinicId, by, "appointment_type.updated", "appointment_type", { id: input.id });
         return input.id;
       }
       const id = crypto.randomUUID();
-      await this.db.run("INSERT INTO appointment_types (id, clinic_id, name, duration_min, buffer_min, online_bookable, colour, active, price_pence) VALUES (?, ?, ?, ?, ?, ?, ?, 1, ?)", [
-        id, clinicId, input.name.trim(), input.durationMin, input.bufferMin, input.onlineBookable ? 1 : 0, input.colour, input.pricePence ?? 0,
+      const newDiscipline: Discipline = input.discipline ?? ((await this.clinic(clinicId)).disciplines === "ayurveda" ? "ayurveda" : "physio");
+      await this.db.run("INSERT INTO appointment_types (id, clinic_id, name, duration_min, buffer_min, online_bookable, colour, active, price_pence, discipline) VALUES (?, ?, ?, ?, ?, ?, ?, 1, ?, ?)", [
+        id, clinicId, input.name.trim(), input.durationMin, input.bufferMin, input.onlineBookable ? 1 : 0, input.colour, input.pricePence ?? 0, newDiscipline,
       ]);
       await this.audit(clinicId, by, "appointment_type.created", "appointment_type", { id });
       return id;
     });
+  }
+
+  /**
+   * Chooses which disciplines the clinic practises. Turning one on adds a few starter appointment types if the clinic
+   * has none for it. Turning one off is refused while appointment types for it are still offered, so the diary
+   * never holds something the clinic has said it does not do.
+   */
+  async setDisciplines(clinicId: string, by: string, value: Disciplines): Promise<void> {
+    if (value !== "physio" && value !== "ayurveda" && value !== "both") throw new DomainError("validation", "Choose physiotherapy, Ayurveda or both");
+    return this.db.scope(clinicId, async () => {
+      const off: Discipline[] = (["physio", "ayurveda"] as const).filter((d) => value !== "both" && value !== d);
+      for (const d of off) {
+        const live = await this.db.get<{ n: string | number }>("SELECT COUNT(*) AS n FROM appointment_types WHERE clinic_id = ? AND discipline = ? AND active = 1", [clinicId, d]);
+        if (Number(live?.n ?? 0) > 0) {
+          throw new DomainError("invalid_state", `Stop offering the ${d === "ayurveda" ? "Ayurveda" : "physiotherapy"} appointment types first (untick “Offered” on each in Settings).`);
+        }
+      }
+      await this.db.run("UPDATE clinics SET disciplines = ? WHERE id = ?", [value, clinicId]);
+      for (const d of (["physio", "ayurveda"] as const).filter((x) => value === "both" || value === x)) {
+        const any = await this.db.get("SELECT 1 FROM appointment_types WHERE clinic_id = ? AND discipline = ?", [clinicId, d]);
+        if (!any) await this.addStarterTypes(clinicId, d);
+      }
+      await this.audit(clinicId, by, "clinic.disciplines_changed", "clinic", { disciplines: value });
+    });
+  }
+
+  /** Starter appointment types for a discipline. Editable, and without prices: the owner sets those. */
+  async addStarterTypes(clinicId: string, discipline: Discipline): Promise<void> {
+    const types: [string, number, number, string][] =
+      discipline === "ayurveda"
+        ? [["Initial Ayurvedic consultation", 60, 10, "purple"], ["Ayurvedic follow-up", 30, 5, "green"], ["Ayurvedic therapy session", 60, 15, "amber"]]
+        : [["Initial assessment", 45, 5, "blue"], ["Follow-up", 30, 5, "green"], ["Review", 20, 5, "amber"]];
+    for (const [name, dur, buf, colour] of types) {
+      await this.db.run("INSERT INTO appointment_types (id, clinic_id, name, duration_min, buffer_min, online_bookable, colour, active, discipline) VALUES (?, ?, ?, ?, ?, 1, ?, 1, ?)", [
+        crypto.randomUUID(), clinicId, name, dur, buf, colour, discipline,
+      ]);
+    }
   }
 
   async getHours(clinicId: string, userId: string): Promise<{ weekday: number; startMin: number; endMin: number }[]> {
