@@ -1,5 +1,6 @@
 import { describe, expect, it } from "vitest";
 import { formatPence, parsePounds } from "@/lib/money";
+import { formatVatNumber, normaliseVatNumber } from "@/lib/vat";
 import { platformSetup, PW, type PlatformSetup } from "./platform.helpers";
 import type { SessionUser } from "@/lib/accounts";
 
@@ -40,6 +41,51 @@ describe("money", () => {
   });
 });
 
+describe("VAT registration number", () => {
+  it("reads common spellings, checks the modulus-97 digits and rejects the rest", () => {
+    expect(normaliseVatNumber("GB 980 7806 84")).toBe("GB980780684");
+    expect(normaliseVatNumber("980780684")).toBe("GB980780684");
+    expect(normaliseVatNumber("gb980-780-684")).toBe("GB980780684");
+    expect(normaliseVatNumber("GB980780684001")).toBe("GB980780684001");
+    expect(normaliseVatNumber("GB GD001")).toBe("GBGD001");
+    expect(normaliseVatNumber("GB980780685")).toBeNull(); // check digits wrong
+    expect(normaliseVatNumber("12345")).toBeNull();
+    expect(normaliseVatNumber("GD500")).toBeNull();
+    expect(formatVatNumber("GB980780684")).toBe("GB 980 7806 84");
+  });
+
+  it("is required when VAT is charged, and not otherwise", async () => {
+    const s = await platformSetup();
+    const base = { invoicePrefix: "INV", creditPrefix: "CN", billingDetails: "", paymentTermsDays: 14 };
+    await expect(s.p.billing.saveSettings(s.owner, { ...base, vatRateBp: 2000, vatNumber: "" })).rejects.toThrow(/Check the billing/);
+    await expect(s.p.billing.saveSettings(s.owner, { ...base, vatRateBp: 2000, vatNumber: "GB123" })).rejects.toThrow(/Check the billing/);
+    await s.p.billing.saveSettings(s.owner, { ...base, vatRateBp: 0, vatNumber: "" });
+    await s.p.billing.saveSettings(s.owner, { ...base, vatRateBp: 2000, vatNumber: "980 7806 84" });
+    expect((await s.p.billing.getSettings(s.clinicId)).vatNumber).toBe("GB980780684");
+  });
+
+  it("is kept on each invoice as issued, copied to its credit note, and left off when no VAT is charged", async () => {
+    const s = await platformSetup();
+    const base = { invoicePrefix: "INV", creditPrefix: "CN", billingDetails: "", paymentTermsDays: 14 };
+    await s.p.billing.saveSettings(s.owner, { ...base, vatRateBp: 0, vatNumber: "GB980780684" });
+    const plain = await s.p.billing.createInvoice(s.owner, manual(s));
+    expect((await s.p.billing.getInvoice(s.clinicId, plain)).vatNumber).toBe("");
+    await s.p.billing.saveSettings(s.owner, { ...base, vatRateBp: 2000, vatNumber: "GB980780684" });
+    const withVat = await s.p.billing.createInvoice(s.owner, manual(s));
+    // The clinic changes its number afterwards: the issued invoice does not change.
+    await s.p.billing.saveSettings(s.owner, { ...base, vatRateBp: 2000, vatNumber: "GB 123 4567 82" }).catch(() => undefined);
+    expect((await s.p.billing.getInvoice(s.clinicId, withVat)).vatNumber).toBe("GB980780684");
+    const credit = await s.p.billing.creditInvoice(s.owner, withVat, "Wrong patient");
+    expect((await s.p.billing.getInvoice(s.clinicId, credit)).vatNumber).toBe("GB980780684");
+  });
+
+  it("refuses to issue a VAT invoice if the rate was switched on without a number", async () => {
+    const s = await platformSetup();
+    await s.q.run("UPDATE clinics SET vat_rate_bp = 2000, vat_number = '' WHERE id = ?", [s.clinicId]);
+    await expect(s.p.billing.createInvoice(s.owner, manual(s))).rejects.toThrow(/VAT registration number/);
+  });
+});
+
 describe("prices and settings", () => {
   it("keeps a price on an appointment type and leaves it alone when a save omits it", async () => {
     const s = await platformSetup();
@@ -53,7 +99,7 @@ describe("prices and settings", () => {
   it("lets only the owner change billing settings, and checks them", async () => {
     const s = await platformSetup();
     const rae = await reception(s);
-    const ok = { invoicePrefix: "fx", creditPrefix: "cr", vatRateBp: 2000, billingDetails: "Fettle Physio\nPay by bank transfer", paymentTermsDays: 7 };
+    const ok = { invoicePrefix: "fx", creditPrefix: "cr", vatRateBp: 2000, vatNumber: "GB 980 7806 84", billingDetails: "Fettle Physio\nPay by bank transfer", paymentTermsDays: 7 };
     await expect(s.p.billing.saveSettings(rae, ok)).rejects.toThrow(/owner/);
     await s.p.billing.saveSettings(s.owner, ok);
     expect(await s.p.billing.getSettings(s.clinicId)).toMatchObject({ invoicePrefix: "FX", creditPrefix: "CR", vatRateBp: 2000, paymentTermsDays: 7 });
@@ -93,7 +139,7 @@ describe("invoices", () => {
 
   it("charges VAT per line at the clinic's rate and rounds to the penny", async () => {
     const s = await platformSetup();
-    await s.p.billing.saveSettings(s.owner, { invoicePrefix: "INV", creditPrefix: "CN", vatRateBp: 2000, billingDetails: "", paymentTermsDays: 14 });
+    await s.p.billing.saveSettings(s.owner, { invoicePrefix: "INV", creditPrefix: "CN", vatRateBp: 2000, vatNumber: "GB980780684", billingDetails: "", paymentTermsDays: 14 });
     const id = await s.p.billing.createInvoice(s.owner, manual(s, { lines: [{ description: "Insoles", quantity: 3, unitPence: 1999 }, { description: "Tape", quantity: 1, unitPence: 333 }] }));
     const inv = await s.p.billing.getInvoice(s.clinicId, id);
     expect(inv.subtotalPence).toBe(3 * 1999 + 333);
@@ -207,7 +253,7 @@ describe("payments", () => {
 describe("credit notes", () => {
   it("cancels an unpaid invoice with a numbered credit note that mirrors it", async () => {
     const s = await platformSetup();
-    await s.p.billing.saveSettings(s.owner, { invoicePrefix: "INV", creditPrefix: "CN", vatRateBp: 2000, billingDetails: "", paymentTermsDays: 14 });
+    await s.p.billing.saveSettings(s.owner, { invoicePrefix: "INV", creditPrefix: "CN", vatRateBp: 2000, vatNumber: "GB980780684", billingDetails: "", paymentTermsDays: 14 });
     const id = await s.p.billing.createInvoice(s.owner, manual(s));
     await expect(s.p.billing.creditInvoice(s.owner, id, "")).rejects.toThrow(/Say why/);
     const cn = await s.p.billing.creditInvoice(s.owner, id, "Raised against the wrong patient");

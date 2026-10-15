@@ -124,11 +124,12 @@ async function SettingsBody(user: SessionUser) {
                     <div><label htmlFor="ip">Invoice number prefix</label><input id="ip" name="invoicePrefix" defaultValue={billing.invoicePrefix} maxLength={8} required /></div>
                     <div><label htmlFor="cp">Credit note prefix</label><input id="cp" name="creditPrefix" defaultValue={billing.creditPrefix} maxLength={8} required /></div>
                     <div><label htmlFor="vr">VAT rate (%)</label><input id="vr" name="vatRate" inputMode="decimal" defaultValue={String(billing.vatRateBp / 100)} /></div>
+                    <div><label htmlFor="vn">VAT registration number</label><input id="vn" name="vatNumber" defaultValue={billing.vatNumber} placeholder="GB 123 4567 89" autoComplete="off" aria-describedby="vnh" /><p id="vnh" className="muted">Required if the VAT rate is above 0. It is printed on every invoice that charges VAT.</p></div>
                     <div><label htmlFor="pt">Payment terms (days)</label><input id="pt" name="paymentTermsDays" type="number" min={0} max={365} defaultValue={billing.paymentTermsDays} required /></div>
                   </div>
                   <label htmlFor="bd">Details printed on invoices</label>
                   <textarea id="bd" name="billingDetails" rows={4} maxLength={1000} defaultValue={billing.billingDetails} />
-                  <p className="muted">Your trading name, address, VAT number if you are registered, and how to pay (bank details). Leave the VAT rate at 0 if you are not VAT registered.</p>
+                  <p className="muted">Your trading name and address, and how to pay (bank details). Leave the VAT rate at 0 if you are not VAT registered.</p>
                 </ActionForm>
               </section>
             ) : null}

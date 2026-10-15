@@ -4,6 +4,7 @@ import { requireUser } from "@/lib/auth";
 import type { SessionUser } from "@/lib/accounts";
 import { getPlatform, withClinic } from "@/lib/app";
 import { DomainError } from "@/lib/errors";
+import { formatVatNumber } from "@/lib/vat";
 import { formatPence, poundsField } from "@/lib/money";
 import { formatLocal, utcToZoned } from "@/lib/tz";
 import { creditInvoiceAction, recordPaymentAction, reversePaymentAction } from "../../actions/billing";
@@ -63,6 +64,7 @@ async function Body({ params }: Props, user: SessionUser) {
             <div>
               <strong>From</strong>
               <div style={{ whiteSpace: "pre-line" }}>{settings.billingDetails || clinic.name}</div>
+              {inv.vatNumber ? <div>VAT registration no. {formatVatNumber(inv.vatNumber)}</div> : null}
             </div>
             <div>
               <strong>To</strong>
@@ -103,6 +105,12 @@ async function Body({ params }: Props, user: SessionUser) {
           <section className="card noprint" aria-labelledby="payments">
             <h2 id="payments">Payments</h2>
             {inv.payments.length === 0 ? <p className="muted">Nothing paid yet.</p> : (
+              <p className="muted">
+                Fettle records money; it does not send it. To refund someone, pay them back as you normally would (bank transfer, cash or card machine), then reverse the payment here and say how you refunded
+                it in the reason. Both entries stay on the record. To cancel the whole invoice afterwards, use a credit note.
+              </p>
+            )}
+            {inv.payments.length === 0 ? null : (
               <div className="tablewrap" tabIndex={0} role="region" aria-label="Payments, scrollable table">
                 <table>
                   <thead><tr><th scope="col">Date</th><th scope="col">Method</th><th scope="col">Amount</th><th scope="col">Reference</th><th scope="col"><span className="sr-only">Actions</span></th></tr></thead>
@@ -116,9 +124,9 @@ async function Body({ params }: Props, user: SessionUser) {
                         <td>
                           {!x.reversesPaymentId && !x.reversed ? (
                             <details className="sub">
-                              <summary>Reverse</summary>
-                              <ActionForm action={reversePaymentAction} hidden={{ id: inv.id, paymentId: x.id }} submitLabel="Reverse payment" submitClass="danger" confirmText="Reverse this payment? The entry stays on the record.">
-                                <label htmlFor={`rr${x.id}`}>Why</label>
+                              <summary>Reverse or refund</summary>
+                              <ActionForm action={reversePaymentAction} hidden={{ id: inv.id, paymentId: x.id }} submitLabel="Reverse payment" submitClass="danger" confirmText="Reverse this payment? Do this once the money has actually been paid back, or if it was recorded by mistake. The entry stays on the record.">
+                                <label htmlFor={`rr${x.id}`}>Why, and how it was refunded if it was</label>
                                 <input id={`rr${x.id}`} name="reason" maxLength={200} required />
                               </ActionForm>
                             </details>
