@@ -1,6 +1,6 @@
 import crypto from "node:crypto";
 import { z } from "zod";
-import { transaction, type Db } from "./db";
+import type { Db } from "./db";
 import { DomainError } from "./errors";
 import type { AppointmentView } from "./scheduling";
 
@@ -68,8 +68,8 @@ export class Forms {
     return this.now().toISOString();
   }
 
-  private audit(clinicId: string, by: string, action: string, detail: unknown) {
-    this.db.prepare("INSERT INTO audit_log (clinic_id, actor, action, detail, at, entity) VALUES (?, ?, ?, ?, ?, 'form')").run(clinicId, by, action, JSON.stringify(detail), this.ts());
+  private async audit(clinicId: string, by: string, action: string, detail: unknown) {
+    await this.db.run("INSERT INTO audit_log (clinic_id, actor, action, detail, at, entity) VALUES (?, ?, ?, ?, ?, 'form')", [clinicId, by, action, JSON.stringify(detail), this.ts()]);
   }
 
   private toDef(r: Record<string, unknown>): FormDef {
@@ -84,18 +84,20 @@ export class Forms {
     };
   }
 
-  list(clinicId: string): FormDef[] {
-    return (this.db.prepare("SELECT * FROM forms WHERE clinic_id = ? ORDER BY name").all(clinicId) as unknown as Record<string, unknown>[]).map((r) => this.toDef(r));
+  async list(clinicId: string): Promise<FormDef[]> {
+    return this.db.scope(clinicId, async () => (await this.db.all("SELECT * FROM forms WHERE clinic_id = ? ORDER BY name", [clinicId])).map((r) => this.toDef(r)));
   }
 
-  get(clinicId: string, id: string): FormDef {
-    const r = this.db.prepare("SELECT * FROM forms WHERE id = ? AND clinic_id = ?").get(id, clinicId);
-    if (!r) throw new DomainError("not_found", "Form not found");
-    return this.toDef(r);
+  async get(clinicId: string, id: string): Promise<FormDef> {
+    return this.db.scope(clinicId, async () => {
+      const r = await this.db.get("SELECT * FROM forms WHERE id = ? AND clinic_id = ?", [id, clinicId]);
+      if (!r) throw new DomainError("not_found", "Form not found");
+      return this.toDef(r);
+    });
   }
 
   /** Creates a form, or saves a new version of an existing one. Past requests keep the version they were sent with. */
-  save(clinicId: string, by: string, input: { id?: string; name: string; kind: "intake" | "consent"; fieldsJson: string; mandatory: boolean; active: boolean }): string {
+  async save(clinicId: string, by: string, input: { id?: string; name: string; kind: "intake" | "consent"; fieldsJson: string; mandatory: boolean; active: boolean }): Promise<string> {
     let fields: FormField[];
     try {
       const parsed = FormFields.safeParse(JSON.parse(input.fieldsJson));
@@ -120,42 +122,49 @@ export class Forms {
       }
     }
     if (!input.name.trim()) throw new DomainError("validation", "Enter a name", [{ path: "name", message: "Enter a name" }]);
-    if (input.id) {
-      const cur = this.get(clinicId, input.id);
-      this.db
-        .prepare("UPDATE forms SET name = ?, kind = ?, fields_json = ?, mandatory = ?, active = ?, version = ? WHERE id = ? AND clinic_id = ?")
-        .run(input.name.trim(), input.kind, JSON.stringify(fields), input.mandatory ? 1 : 0, input.active ? 1 : 0, cur.version + 1, input.id, clinicId);
-      this.audit(clinicId, by, "form.updated", { id: input.id, version: cur.version + 1 });
-      return input.id;
-    }
-    const id = crypto.randomUUID();
-    this.db
-      .prepare("INSERT INTO forms (id, clinic_id, name, kind, fields_json, mandatory, active, version, created_at) VALUES (?, ?, ?, ?, ?, ?, ?, 1, ?)")
-      .run(id, clinicId, input.name.trim(), input.kind, JSON.stringify(fields), input.mandatory ? 1 : 0, input.active ? 1 : 0, this.ts());
-    this.audit(clinicId, by, "form.created", { id });
-    return id;
+    return this.db.scope(clinicId, async () => {
+      if (input.id) {
+        const cur = await this.get(clinicId, input.id);
+        await this.db.run(
+          "UPDATE forms SET name = ?, kind = ?, fields_json = ?, mandatory = ?, active = ?, version = ? WHERE id = ? AND clinic_id = ?",
+          [input.name.trim(), input.kind, JSON.stringify(fields), input.mandatory ? 1 : 0, input.active ? 1 : 0, cur.version + 1, input.id, clinicId],
+        );
+        await this.audit(clinicId, by, "form.updated", { id: input.id, version: cur.version + 1 });
+        return input.id;
+      }
+      const id = crypto.randomUUID();
+      await this.db.run(
+        "INSERT INTO forms (id, clinic_id, name, kind, fields_json, mandatory, active, version, created_at) VALUES (?, ?, ?, ?, ?, ?, ?, 1, ?)",
+        [id, clinicId, input.name.trim(), input.kind, JSON.stringify(fields), input.mandatory ? 1 : 0, input.active ? 1 : 0, this.ts()],
+      );
+      await this.audit(clinicId, by, "form.created", { id });
+      return id;
+    });
   }
 
   /** Attaches every active form to a new appointment. Used by the booking hook. */
-  requestForAppointment(a: AppointmentView, clinicId: string): FormRequestView[] {
-    const forms = this.list(clinicId).filter((f) => f.active);
-    const out: string[] = [];
-    for (const f of forms) {
-      // Returning patients do not redo a mandatory form they have already completed on this version.
-      const done = this.db
-        .prepare("SELECT 1 FROM form_requests WHERE patient_id = ? AND form_id = ? AND form_version = ? AND status = 'completed' LIMIT 1")
-        .get(a.patientId, f.id, f.version);
-      if (done) continue;
-      const id = crypto.randomUUID();
-      const res = this.db
-        .prepare(
-          `INSERT OR IGNORE INTO form_requests (id, clinic_id, appointment_id, patient_id, form_id, form_name, form_version, mandatory, fields_json, status, created_at)
-           VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, 'pending', ?)`,
-        )
-        .run(id, clinicId, a.id, a.patientId, f.id, f.name, f.version, f.mandatory ? 1 : 0, JSON.stringify(f.fields), this.ts());
-      if (Number(res.changes)) out.push(id);
-    }
-    return out.map((id) => this.request(id));
+  async requestForAppointment(a: AppointmentView, clinicId: string): Promise<FormRequestView[]> {
+    return this.db.scope(clinicId, async () => {
+      const forms = (await this.list(clinicId)).filter((f) => f.active);
+      const out: string[] = [];
+      for (const f of forms) {
+        // Returning patients do not redo a mandatory form they have already completed on this version.
+        const done = await this.db.get(
+          "SELECT 1 FROM form_requests WHERE patient_id = ? AND form_id = ? AND form_version = ? AND status = 'completed' LIMIT 1",
+          [a.patientId, f.id, f.version],
+        );
+        if (done) continue;
+        const id = crypto.randomUUID();
+        const n = await this.db.run(
+          `INSERT INTO form_requests (id, clinic_id, appointment_id, patient_id, form_id, form_name, form_version, mandatory, fields_json, status, created_at)
+           VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, 'pending', ?)
+           ON CONFLICT (appointment_id, form_id) DO NOTHING`,
+          [id, clinicId, a.id, a.patientId, f.id, f.name, f.version, f.mandatory ? 1 : 0, JSON.stringify(f.fields), this.ts()],
+        );
+        if (n) out.push(id);
+      }
+      return Promise.all(out.map((id) => this.request(id)));
+    });
   }
 
   private toRequest(r: Record<string, unknown>): FormRequestView {
@@ -172,14 +181,15 @@ export class Forms {
     };
   }
 
-  request(id: string): FormRequestView {
-    const r = this.db.prepare("SELECT * FROM form_requests WHERE id = ?").get(id);
+  /** Needs an open clinic scope: patient links find the clinic first (see Resolver) and then call this. */
+  async request(id: string): Promise<FormRequestView> {
+    const r = await this.db.get("SELECT * FROM form_requests WHERE id = ?", [id]);
     if (!r) throw new DomainError("not_found", "Form not found");
     return this.toRequest(r);
   }
 
-  forAppointment(appointmentId: string): FormRequestView[] {
-    return (this.db.prepare("SELECT * FROM form_requests WHERE appointment_id = ? ORDER BY created_at, rowid").all(appointmentId) as unknown as Record<string, unknown>[]).map((r) => this.toRequest(r));
+  async forAppointment(appointmentId: string): Promise<FormRequestView[]> {
+    return (await this.db.all("SELECT * FROM form_requests WHERE appointment_id = ? ORDER BY created_at, seq", [appointmentId])).map((r) => this.toRequest(r));
   }
 
   /** Checks answers against the frozen questions. Only known question ids are kept. */
@@ -209,13 +219,13 @@ export class Forms {
     return { issues, clean };
   }
 
-  complete(id: string, answers: Record<string, string>): void {
-    transaction(this.db, () => {
-      const req = this.request(id);
-      if (req.status === "completed") throw new DomainError("invalid_state", "This form has already been completed");
-      const { issues, clean } = this.check(req.fields, answers);
-      if (issues.length) throw new DomainError("validation", "Please check your answers", issues);
-      this.db.prepare("UPDATE form_requests SET status = 'completed', response_json = ?, completed_at = ? WHERE id = ?").run(JSON.stringify(clean), this.ts(), id);
-    });
+  async complete(id: string, answers: Record<string, string>): Promise<void> {
+    const req = await this.request(id);
+    if (req.status === "completed") throw new DomainError("invalid_state", "This form has already been completed");
+    const { issues, clean } = this.check(req.fields, answers);
+    if (issues.length) throw new DomainError("validation", "Please check your answers", issues);
+    // Conditional update: two submissions at once cannot both complete it.
+    const n = await this.db.run("UPDATE form_requests SET status = 'completed', response_json = ?, completed_at = ? WHERE id = ? AND status = 'pending'", [JSON.stringify(clean), this.ts(), id]);
+    if (!n) throw new DomainError("invalid_state", "This form has already been completed");
   }
 }

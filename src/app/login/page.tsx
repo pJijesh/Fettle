@@ -7,7 +7,7 @@ import { ActionForm } from "../Forms";
 export const dynamic = "force-dynamic";
 
 export default async function LoginPage() {
-  if (!getAccounts().hasUsers()) redirect("/setup");
+  if (!await getAccounts().hasUsers()) redirect("/setup");
   const s = await currentSession();
   if (s?.mfaOk) redirect("/");
   return (

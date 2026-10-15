@@ -1,7 +1,8 @@
 import Link from "next/link";
 import { notFound } from "next/navigation";
 import { requireUser } from "@/lib/auth";
-import { getPlatform } from "@/lib/app";
+import type { SessionUser } from "@/lib/accounts";
+import { getPlatform, withClinic } from "@/lib/app";
 import { DomainError } from "@/lib/errors";
 import { formatLocal } from "@/lib/tz";
 import { addWaitlistAction, mergePatientsAction, updatePatientAction } from "../../actions/staff";
@@ -13,14 +14,20 @@ export const dynamic = "force-dynamic";
 
 const WEEKDAYS = ["Mon", "Tue", "Wed", "Thu", "Fri", "Sat", "Sun"];
 
-export default async function PatientPage({ params, searchParams }: { params: Promise<{ id: string }>; searchParams: Promise<{ mq?: string }> }) {
+type Props = { params: Promise<{ id: string }>; searchParams: Promise<{ mq?: string }> };
+
+export default async function PatientPage(props: Props) {
   const user = await requireUser();
+  return withClinic(user.clinicId, () => PatientPageBody(props, user));
+}
+
+async function PatientPageBody({ params, searchParams }: Props, user: SessionUser) {
   const { id } = await params;
   const { mq = "" } = await searchParams;
   const p = getPlatform();
   let patient;
   try {
-    patient = p.scheduling.viewPatient(user.clinicId, user.email, id);
+    patient = await p.scheduling.viewPatient(user.clinicId, user.email, id);
   } catch (err) {
     if (err instanceof DomainError && err.code === "not_found") notFound();
     throw err;
@@ -33,20 +40,20 @@ export default async function PatientPage({ params, searchParams }: { params: Pr
       </>
     );
   }
-  const tz = p.scheduling.clinic(user.clinicId).timezone;
+  const tz = (await p.scheduling.clinic(user.clinicId)).timezone;
   const now = p.now();
-  const appts = p.scheduling.listAppointments(user.clinicId, {
+  const appts = await p.scheduling.listAppointments(user.clinicId, {
     patientId: id, includeCancelled: true,
     fromUtc: new Date(now.getTime() - 3 * 365 * 86_400_000).toISOString(), toUtc: new Date(now.getTime() + 365 * 86_400_000).toISOString(),
   });
   const upcoming = appts.filter((a) => new Date(a.endAt) > now && (a.status === "booked" || a.status === "arrived"));
   const past = appts.filter((a) => !upcoming.includes(a)).reverse();
-  const consults = p.scheduling.consultsForPatient(user.clinicId, id);
-  const types = p.scheduling.listTypes(user.clinicId, { onlyActive: true });
-  const clinicians = p.scheduling.clinicians(user.clinicId);
-  const onList = p.waitlist.list(user.clinicId).filter((w) => w.patientId === id);
-  const mergeCandidates = mq ? p.scheduling.searchPatients(user.clinicId, mq, 10).filter((c) => c.id !== id) : [];
-  const dupes = p.scheduling.findDuplicates(user.clinicId, patient, id);
+  const consults = await p.scheduling.consultsForPatient(user.clinicId, id);
+  const types = await p.scheduling.listTypes(user.clinicId, { onlyActive: true });
+  const clinicians = await p.scheduling.clinicians(user.clinicId);
+  const onList = (await p.waitlist.list(user.clinicId)).filter((w) => w.patientId === id);
+  const mergeCandidates = mq ? (await p.scheduling.searchPatients(user.clinicId, mq, 10)).filter((c) => c.id !== id) : [];
+  const dupes = await p.scheduling.findDuplicates(user.clinicId, patient, id);
   const defaultFrom = now.toISOString().slice(0, 10);
   const defaultTo = new Date(now.getTime() + 28 * 86_400_000).toISOString().slice(0, 10);
 

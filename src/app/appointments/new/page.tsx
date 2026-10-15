@@ -1,6 +1,7 @@
 import Link from "next/link";
 import { requireUser } from "@/lib/auth";
-import { getPlatform } from "@/lib/app";
+import type { SessionUser } from "@/lib/accounts";
+import { getPlatform, withClinic } from "@/lib/app";
 import { DomainError } from "@/lib/errors";
 import { minutesToClock, utcToZoned } from "@/lib/tz";
 import { createAppointmentAction } from "../../actions/staff";
@@ -11,8 +12,14 @@ export const dynamic = "force-dynamic";
 
 type SP = Promise<{ patient?: string; q?: string; date?: string; time?: string; user?: string; type?: string }>;
 
-export default async function NewAppointment({ searchParams }: { searchParams: SP }) {
+type Props = { searchParams: SP };
+
+export default async function NewAppointment(props: Props) {
   const user = await requireUser();
+  return withClinic(user.clinicId, () => NewAppointmentBody(props, user));
+}
+
+async function NewAppointmentBody({ searchParams }: Props, user: SessionUser) {
   const sp = await searchParams;
   const p = getPlatform();
   const keep = new URLSearchParams(Object.entries({ date: sp.date, time: sp.time, user: sp.user, type: sp.type }).filter(([, v]) => v) as [string, string][]).toString();
@@ -20,13 +27,13 @@ export default async function NewAppointment({ searchParams }: { searchParams: S
   let patient = null;
   if (sp.patient) {
     try {
-      patient = p.scheduling.getPatient(user.clinicId, sp.patient);
+      patient = await p.scheduling.getPatient(user.clinicId, sp.patient);
     } catch (err) {
       if (!(err instanceof DomainError)) throw err;
     }
   }
   if (!patient) {
-    const results = sp.q ? p.scheduling.searchPatients(user.clinicId, sp.q, 15) : [];
+    const results = sp.q ? await p.scheduling.searchPatients(user.clinicId, sp.q, 15) : [];
     return (
       <>
         <Header user={user} />
@@ -55,9 +62,9 @@ export default async function NewAppointment({ searchParams }: { searchParams: S
     );
   }
 
-  const clinic = p.scheduling.clinic(user.clinicId);
-  const types = p.scheduling.listTypes(user.clinicId, { onlyActive: true });
-  const clinicians = p.scheduling.clinicians(user.clinicId);
+  const clinic = await p.scheduling.clinic(user.clinicId);
+  const types = await p.scheduling.listTypes(user.clinicId, { onlyActive: true });
+  const clinicians = await p.scheduling.clinicians(user.clinicId);
   const nowZ = utcToZoned(p.now(), clinic.timezone);
   const defaultTime = sp.time ?? minutesToClock(Math.ceil((nowZ.minutes + 30) / 15) * 15 % 1440);
   const defaultUser = sp.user && clinicians.some((c) => c.id === sp.user) ? sp.user : clinicians.some((c) => c.id === user.id) ? user.id : clinicians[0]?.id;

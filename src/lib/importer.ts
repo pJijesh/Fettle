@@ -1,5 +1,5 @@
 import crypto from "node:crypto";
-import type { Db } from "./db";
+import { isOverlap, type Db } from "./db";
 import { DomainError } from "./errors";
 import { parseCsv } from "./csv";
 import { FIELDS, type FieldDef, type ImportKind, type ImportSource } from "./import-meta";
@@ -190,11 +190,11 @@ export class Importer {
    * `rows` is a file already read into text (CSV or Excel); `text` is raw CSV. `mapping` is one field key (or null) per
    * column, as corrected by the person; without it columns are matched by heading.
    */
-  run(
+  async run(
     clinicId: string,
     by: string,
     input: { kind: ImportKind; source: ImportSource; filename: string; text?: string; rows?: string[][]; mapping?: (string | null)[]; dryRun: boolean },
-  ): ImportReport {
+  ): Promise<ImportReport> {
     if (input.text !== undefined && Buffer.byteLength(input.text) > MAX_BYTES) throw new DomainError("validation", "That file is too large. Split it into files under 5 MB.");
     const table = input.rows ?? parseCsv(input.text ?? "");
     if (table.length < 2) throw new DomainError("validation", "The file has no rows to import. It needs a header row and at least one row of data.");
@@ -214,33 +214,32 @@ export class Importer {
     }
 
     const batchId = crypto.randomUUID();
-    this.db.exec("BEGIN IMMEDIATE");
-    try {
-      const report = input.kind === "patients" ? this.patients(clinicId, by, batchId, table, mapped, base()) : this.appointments(clinicId, by, batchId, table, mapped, base());
+    const work = async (): Promise<ImportReport> => {
+      const report = input.kind === "patients" ? await this.patients(clinicId, by, batchId, table, mapped, base()) : await this.appointments(clinicId, by, batchId, table, mapped, base());
       report.dryRun = input.dryRun;
       if (input.dryRun) {
-        this.db.exec("ROLLBACK");
         report.batchId = null;
-      } else {
-        this.db
-          .prepare("INSERT INTO import_batches (id, clinic_id, kind, filename, created_by, created_at, counts_json) VALUES (?, ?, ?, ?, ?, ?, ?)")
-          .run(batchId, clinicId, `${input.kind}:${input.source}`, input.filename.slice(0, 120), by, this.ts(), JSON.stringify({ created: report.created, existing: report.existing, rejected: report.rejected.length }));
-        this.db.prepare("INSERT INTO audit_log (clinic_id, actor, action, detail, at, entity) VALUES (?, ?, 'import.committed', ?, ?, 'import')").run(clinicId, by, JSON.stringify({ batchId, kind: input.kind, created: report.created }), this.ts());
-        this.db.exec("COMMIT");
-        report.batchId = batchId;
+        // The dry run is the real import with the transaction thrown away at the end, so it cannot disagree with the real run.
+        throw new DryRun(report);
       }
+      await this.db.run("INSERT INTO import_batches (id, clinic_id, kind, filename, created_by, created_at, counts_json) VALUES (?, ?, ?, ?, ?, ?, ?)", [
+        batchId, clinicId, `${input.kind}:${input.source}`, input.filename.slice(0, 120), by, this.ts(), JSON.stringify({ created: report.created, existing: report.existing, rejected: report.rejected.length }),
+      ]);
+      await this.db.run("INSERT INTO audit_log (clinic_id, actor, action, detail, at, entity) VALUES (?, ?, 'import.committed', ?, ?, 'import')", [
+        clinicId, by, JSON.stringify({ batchId, kind: input.kind, created: report.created }), this.ts(),
+      ]);
+      report.batchId = batchId;
       return report;
+    };
+    try {
+      return await this.db.scope(clinicId, work);
     } catch (err) {
-      try {
-        this.db.exec("ROLLBACK");
-      } catch {
-        /* already rolled back */
-      }
+      if (err instanceof DryRun) return err.report;
       throw err;
     }
   }
 
-  private patients(clinicId: string, by: string, batchId: string, table: string[][], { col }: Mapped, report: ImportReport): ImportReport {
+  private async patients(clinicId: string, by: string, batchId: string, table: string[][], { col }: Mapped, report: ImportReport): Promise<ImportReport> {
     report.batchId = batchId;
     const get = (r: string[], k: string) => (k in col ? (r[col[k]] ?? "").trim() : "");
     for (let i = 1; i < table.length; i++) {
@@ -255,14 +254,14 @@ export class Importer {
         continue;
       }
       const email = get(r, "email").toLowerCase();
-      const dup = this.scheduling.findDuplicates(clinicId, { firstName: first, lastName: last, dob, email: email || null });
+      const dup = await this.scheduling.findDuplicates(clinicId, { firstName: first, lastName: last, dob, email: email || null });
       if (dup.length) {
         report.existing++;
         continue;
       }
       try {
-        const id = this.scheduling.createPatient(clinicId, by, { firstName: first, lastName: last, dob, email: email || null, phone: get(r, "phone") || null, gpName: get(r, "gpName") || null, gpPractice: get(r, "gpPractice") || null, address: get(r, "address") || null, postcode: get(r, "postcode") || null });
-        this.db.prepare("UPDATE patients SET external_ref = ?, import_batch = ? WHERE id = ?").run(get(r, "ref") || null, batchId, id);
+        const id = await this.scheduling.createPatient(clinicId, by, { firstName: first, lastName: last, dob, email: email || null, phone: get(r, "phone") || null, gpName: get(r, "gpName") || null, gpPractice: get(r, "gpPractice") || null, address: get(r, "address") || null, postcode: get(r, "postcode") || null });
+        await this.db.run("UPDATE patients SET external_ref = ?, import_batch = ? WHERE id = ?", [get(r, "ref") || null, batchId, id]);
         report.created++;
         if (report.preview.length < 5) report.preview.push(`${first} ${last}${dob ? `, born ${dob}` : ""}`);
       } catch (err) {
@@ -273,11 +272,11 @@ export class Importer {
     return report;
   }
 
-  private appointments(clinicId: string, by: string, batchId: string, table: string[][], { col }: Mapped, report: ImportReport): ImportReport {
+  private async appointments(clinicId: string, by: string, batchId: string, table: string[][], { col }: Mapped, report: ImportReport): Promise<ImportReport> {
     report.batchId = batchId;
-    const tz = this.scheduling.clinic(clinicId).timezone;
-    const types = this.scheduling.listTypes(clinicId);
-    const people = this.scheduling.clinicians(clinicId);
+    const tz = (await this.scheduling.clinic(clinicId)).timezone;
+    const types = await this.scheduling.listTypes(clinicId);
+    const people = await this.scheduling.clinicians(clinicId);
     const get = (r: string[], k: string) => (k in col ? (r[col[k]] ?? "").trim() : "");
     const nowIso = this.ts();
 
@@ -292,11 +291,11 @@ export class Importer {
       }
       // patient
       let patient: { id: string } | undefined;
-      if (get(r, "patientRef")) patient = this.db.prepare("SELECT id FROM patients WHERE clinic_id = ? AND external_ref = ? AND merged_into IS NULL").get(clinicId, get(r, "patientRef")) as { id: string } | undefined;
-      if (!patient && get(r, "patientEmail")) patient = this.db.prepare("SELECT id FROM patients WHERE clinic_id = ? AND email = ? AND merged_into IS NULL ORDER BY created_at LIMIT 1").get(clinicId, get(r, "patientEmail").toLowerCase()) as { id: string } | undefined;
+      if (get(r, "patientRef")) patient = await this.db.get<{ id: string }>("SELECT id FROM patients WHERE clinic_id = ? AND external_ref = ? AND merged_into IS NULL", [clinicId, get(r, "patientRef")]);
+      if (!patient && get(r, "patientEmail")) patient = await this.db.get<{ id: string }>("SELECT id FROM patients WHERE clinic_id = ? AND email = ? AND merged_into IS NULL ORDER BY created_at LIMIT 1", [clinicId, get(r, "patientEmail").toLowerCase()]);
       if (!patient && get(r, "patientName")) {
         const [f, l] = splitName(get(r, "patientName"));
-        const rows = this.db.prepare("SELECT id FROM patients WHERE clinic_id = ? AND merged_into IS NULL AND lower(first_name) = lower(?) AND lower(last_name) = lower(?)").all(clinicId, f, l) as unknown as { id: string }[];
+        const rows = await this.db.all<{ id: string }>("SELECT id FROM patients WHERE clinic_id = ? AND merged_into IS NULL AND lower(first_name) = lower(?) AND lower(last_name) = lower(?)", [clinicId, f, l]);
         if (rows.length > 1) {
           reject(`More than one patient is called “${get(r, "patientName")}”; add an email or id column`);
           continue;
@@ -330,22 +329,23 @@ export class Importer {
       const status = /cancel/.test(statusText) ? "cancelled" : /dna|no.?show|did not attend/.test(statusText) ? "no_show" : start.toISOString() < nowIso ? "completed" : "booked";
       const reasonText = status === "cancelled" ? "Cancelled in previous system" : null;
       // Skip an exact repeat so importing the same file twice does not double up.
-      const same = this.db.prepare("SELECT 1 FROM appointments WHERE user_id = ? AND patient_id = ? AND start_at = ? AND status <> 'cancelled'").get(clinician.id, patient.id, start.toISOString());
+      const same = await this.db.get("SELECT 1 FROM appointments WHERE user_id = ? AND patient_id = ? AND start_at = ? AND status <> 'cancelled'", [clinician.id, patient.id, start.toISOString()]);
       if (same && status !== "cancelled") {
         report.existing++;
         continue;
       }
       try {
-        this.db
-          .prepare(
+        await this.db.attempt(() =>
+          this.db.run(
             `INSERT INTO appointments (id, clinic_id, patient_id, user_id, type_id, start_at, end_at, hold_until, status, cancel_reason, source, created_by, created_at, updated_at, import_batch)
              VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, 'import', ?, ?, ?, ?)`,
-          )
-          .run(crypto.randomUUID(), clinicId, patient.id, clinician.id, type.id, start.toISOString(), end.toISOString(), hold.toISOString(), status, reasonText, by, nowIso, nowIso, batchId);
+            [crypto.randomUUID(), clinicId, patient.id, clinician.id, type.id, start.toISOString(), end.toISOString(), hold.toISOString(), status, reasonText, by, nowIso, nowIso, batchId],
+          ),
+        );
         report.created++;
         if (report.preview.length < 5) report.preview.push(`${utcToZoned(start, tz).date} ${type.name} with ${clinician.name} (${status})`);
       } catch (err) {
-        if (String(err).includes("appointment_overlap")) reject(`Overlaps another appointment for ${clinician.name}`);
+        if (isOverlap(err)) reject(`Overlaps another appointment for ${clinician.name}`);
         else throw err;
       }
     }
@@ -353,48 +353,57 @@ export class Importer {
   }
 
   list(clinicId: string) {
-    return (
-      this.db.prepare("SELECT id, kind, filename, created_by, created_at, undone_at, counts_json FROM import_batches WHERE clinic_id = ? ORDER BY created_at DESC LIMIT 30").all(clinicId) as unknown as {
-        id: string; kind: string; filename: string; created_by: string; created_at: string; undone_at: string | null; counts_json: string;
-      }[]
-    ).map((b) => ({
-      ...b,
-      counts: JSON.parse(b.counts_json) as { created: number; existing: number; rejected: number },
-      canUndo: !b.undone_at && this.now().getTime() - new Date(b.created_at).getTime() <= UNDO_DAYS * 86_400_000,
-    }));
+    return this.db.scope(clinicId, async () =>
+      (
+        await this.db.all<{ id: string; kind: string; filename: string; created_by: string; created_at: string; undone_at: string | null; counts_json: string }>(
+          "SELECT id, kind, filename, created_by, created_at, undone_at, counts_json FROM import_batches WHERE clinic_id = ? ORDER BY created_at DESC LIMIT 30",
+          [clinicId],
+        )
+      ).map((b) => ({
+        ...b,
+        counts: JSON.parse(b.counts_json) as { created: number; existing: number; rejected: number },
+        canUndo: !b.undone_at && this.now().getTime() - new Date(b.created_at).getTime() <= UNDO_DAYS * 86_400_000,
+      })),
+    );
   }
 
   /** Removes what a batch added, within seven days. Patients who have since been given other records are kept. */
-  undo(clinicId: string, by: string, batchId: string): { removedAppointments: number; removedPatients: number; keptPatients: number } {
-    const b = this.db.prepare("SELECT created_at, undone_at FROM import_batches WHERE id = ? AND clinic_id = ?").get(batchId, clinicId) as { created_at: string; undone_at: string | null } | undefined;
-    if (!b) throw new DomainError("not_found", "Import not found");
-    if (b.undone_at) throw new DomainError("invalid_state", "This import was already undone");
-    if (this.now().getTime() - new Date(b.created_at).getTime() > UNDO_DAYS * 86_400_000) throw new DomainError("invalid_state", `Imports can only be undone within ${UNDO_DAYS} days`);
-    this.db.exec("BEGIN IMMEDIATE");
-    try {
-      const a = this.db.prepare("DELETE FROM appointments WHERE clinic_id = ? AND import_batch = ?").run(clinicId, batchId);
-      const candidates = this.db.prepare("SELECT id FROM patients WHERE clinic_id = ? AND import_batch = ?").all(clinicId, batchId) as unknown as { id: string }[];
+  async undo(clinicId: string, by: string, batchId: string): Promise<{ removedAppointments: number; removedPatients: number; keptPatients: number }> {
+    return this.db.scope(clinicId, async () => {
+      const b = await this.db.get<{ created_at: string; undone_at: string | null }>("SELECT created_at, undone_at FROM import_batches WHERE id = ? AND clinic_id = ? FOR UPDATE", [batchId, clinicId]);
+      if (!b) throw new DomainError("not_found", "Import not found");
+      if (b.undone_at) throw new DomainError("invalid_state", "This import was already undone");
+      if (this.now().getTime() - new Date(b.created_at).getTime() > UNDO_DAYS * 86_400_000) throw new DomainError("invalid_state", `Imports can only be undone within ${UNDO_DAYS} days`);
+      const removedAppointments = await this.db.run("DELETE FROM appointments WHERE clinic_id = ? AND import_batch = ?", [clinicId, batchId]);
+      const candidates = await this.db.all<{ id: string }>("SELECT id FROM patients WHERE clinic_id = ? AND import_batch = ?", [clinicId, batchId]);
       let removed = 0;
       let kept = 0;
       for (const p of candidates) {
         const used =
-          this.db.prepare("SELECT 1 FROM appointments WHERE patient_id = ?").get(p.id) ||
-          this.db.prepare("SELECT 1 FROM consults WHERE patient_id = ?").get(p.id) ||
-          this.db.prepare("SELECT 1 FROM waitlist WHERE patient_id = ?").get(p.id) ||
-          this.db.prepare("SELECT 1 FROM patients WHERE merged_into = ?").get(p.id);
+          (await this.db.get("SELECT 1 FROM appointments WHERE patient_id = ?", [p.id])) ||
+          (await this.db.get("SELECT 1 FROM consults WHERE patient_id = ?", [p.id])) ||
+          (await this.db.get("SELECT 1 FROM waitlist WHERE patient_id = ?", [p.id])) ||
+          (await this.db.get("SELECT 1 FROM form_requests WHERE patient_id = ?", [p.id])) ||
+          (await this.db.get("SELECT 1 FROM portal_codes WHERE patient_id = ?", [p.id])) ||
+          (await this.db.get("SELECT 1 FROM patients WHERE merged_into = ?", [p.id]));
         if (used) kept++;
         else {
-          this.db.prepare("DELETE FROM patients WHERE id = ?").run(p.id);
+          await this.db.run("DELETE FROM patients WHERE id = ?", [p.id]);
           removed++;
         }
       }
-      this.db.prepare("UPDATE import_batches SET undone_at = ? WHERE id = ?").run(this.ts(), batchId);
-      this.db.prepare("INSERT INTO audit_log (clinic_id, actor, action, detail, at, entity) VALUES (?, ?, 'import.undone', ?, ?, 'import')").run(clinicId, by, JSON.stringify({ batchId, appointments: Number(a.changes), patients: removed, kept }), this.ts());
-      this.db.exec("COMMIT");
-      return { removedAppointments: Number(a.changes), removedPatients: removed, keptPatients: kept };
-    } catch (err) {
-      this.db.exec("ROLLBACK");
-      throw err;
-    }
+      await this.db.run("UPDATE import_batches SET undone_at = ? WHERE id = ?", [this.ts(), batchId]);
+      await this.db.run("INSERT INTO audit_log (clinic_id, actor, action, detail, at, entity) VALUES (?, ?, 'import.undone', ?, ?, 'import')", [
+        clinicId, by, JSON.stringify({ batchId, appointments: removedAppointments, patients: removed, kept }), this.ts(),
+      ]);
+      return { removedAppointments, removedPatients: removed, keptPatients: kept };
+    });
+  }
+}
+
+/** Thrown to throw away a dry run's transaction while carrying its report out. */
+class DryRun extends Error {
+  constructor(readonly report: ImportReport) {
+    super("dry run");
   }
 }

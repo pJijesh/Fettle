@@ -1,7 +1,8 @@
 import Link from "next/link";
 import { notFound } from "next/navigation";
 import { requireUser } from "@/lib/auth";
-import { getPlatform } from "@/lib/app";
+import type { SessionUser } from "@/lib/accounts";
+import { getPlatform, withClinic } from "@/lib/app";
 import { DomainError } from "@/lib/errors";
 import { makeLink } from "@/lib/links";
 import { formatLocal, minutesToClock, utcToZoned } from "@/lib/tz";
@@ -11,22 +12,28 @@ import { Header } from "../../Header";
 
 export const dynamic = "force-dynamic";
 
-export default async function AppointmentPage({ params }: { params: Promise<{ id: string }> }) {
+type Props = { params: Promise<{ id: string }> };
+
+export default async function AppointmentPage(props: Props) {
   const user = await requireUser();
+  return withClinic(user.clinicId, () => AppointmentPageBody(props, user));
+}
+
+async function AppointmentPageBody({ params }: Props, user: SessionUser) {
   const { id } = await params;
   const p = getPlatform();
   let a;
   try {
-    a = p.scheduling.getAppointment(user.clinicId, id);
+    a = await p.scheduling.getAppointment(user.clinicId, id);
   } catch (err) {
     if (err instanceof DomainError && err.code === "not_found") notFound();
     throw err;
   }
-  const clinic = p.scheduling.clinic(user.clinicId);
+  const clinic = await p.scheduling.clinic(user.clinicId);
   const tz = clinic.timezone;
-  const patient = p.scheduling.getPatient(user.clinicId, a.patientId);
-  const forms = p.forms.forAppointment(id);
-  const clinicians = p.scheduling.clinicians(user.clinicId);
+  const patient = await p.scheduling.getPatient(user.clinicId, a.patientId);
+  const forms = await p.forms.forAppointment(id);
+  const clinicians = await p.scheduling.clinicians(user.clinicId);
   const start = utcToZoned(new Date(a.startAt), tz);
   const started = new Date(a.startAt) <= p.now();
   const open = a.status === "booked" || a.status === "arrived";

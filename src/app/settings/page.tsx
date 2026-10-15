@@ -1,6 +1,7 @@
 import Link from "next/link";
 import { requireUser } from "@/lib/auth";
-import { getPlatform } from "@/lib/app";
+import type { SessionUser } from "@/lib/accounts";
+import { getPlatform, withClinic } from "@/lib/app";
 import { minutesToClock } from "@/lib/tz";
 import { createUserAction, deactivateUserAction, icalRevokeAction, resetPasswordAction, saveHoursAction, saveTypeAction } from "../actions/staff";
 import { ActionForm } from "../Forms";
@@ -13,12 +14,19 @@ const COLOURS = ["blue", "green", "amber", "red", "purple", "grey"];
 
 export default async function Settings() {
   const user = await requireUser(["owner", "clinician"]);
+  return withClinic(user.clinicId, () => SettingsBody(user));
+}
+
+async function SettingsBody(user: SessionUser) {
   const p = getPlatform();
   const isOwner = user.role === "owner";
-  const hasFeed = p.ical.hasActive(user.id);
-  const types = isOwner ? p.scheduling.listTypes(user.clinicId) : [];
-  const staff = isOwner ? p.accounts.listUsers(user.clinicId) : [];
-  const clinic = p.scheduling.clinic(user.clinicId);
+  const hasFeed = await p.ical.hasActive(user.clinicId, user.id);
+  const types = isOwner ? await p.scheduling.listTypes(user.clinicId) : [];
+  const staff = isOwner ? await p.accounts.listUsers(user.clinicId) : [];
+  const clinic = await p.scheduling.clinic(user.clinicId);
+  const clinicianHours = isOwner
+    ? await Promise.all((await p.scheduling.clinicians(user.clinicId)).map(async (c) => ({ c, hrs: await p.scheduling.getHours(user.clinicId, c.id) })))
+    : [];
   const base = p.baseUrl();
 
   return (
@@ -81,8 +89,7 @@ export default async function Settings() {
             <section className="card" aria-labelledby="hours">
               <h2 id="hours">Working hours</h2>
               <p className="muted">Online booking only offers times inside these hours. Leave a day empty for days off; use the second row for a split day (for example 09:00–12:30 and 14:00–17:30).</p>
-              {p.scheduling.clinicians(user.clinicId).map((c) => {
-                const hrs = p.scheduling.getHours(user.clinicId, c.id);
+              {clinicianHours.map(({ c, hrs }) => {
                 return (
                   <details key={c.id} className="sub">
                     <summary>{c.name}</summary>

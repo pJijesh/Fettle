@@ -1,6 +1,7 @@
 import Link from "next/link";
 import { requireUser } from "@/lib/auth";
-import { getPlatform } from "@/lib/app";
+import type { SessionUser } from "@/lib/accounts";
+import { getPlatform, withClinic } from "@/lib/app";
 import { saveFormAction } from "../../actions/staff";
 import { ActionForm } from "../../Forms";
 import { Header } from "../../Header";
@@ -10,7 +11,11 @@ export const dynamic = "force-dynamic";
 
 export default async function FormsSettings() {
   const user = await requireUser(["owner"]);
-  const forms = getPlatform().forms.list(user.clinicId);
+  return withClinic(user.clinicId, () => FormsSettingsBody(user));
+}
+
+async function FormsSettingsBody(user: SessionUser) {
+  const forms = await getPlatform().forms.list(user.clinicId);
   return (
     <>
       <Header user={user} />

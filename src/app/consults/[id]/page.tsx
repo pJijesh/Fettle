@@ -1,7 +1,8 @@
 import Link from "next/link";
 import { notFound } from "next/navigation";
 import { requireUser } from "@/lib/auth";
-import { getService } from "@/lib/app";
+import type { SessionUser } from "@/lib/accounts";
+import { getService, withClinic } from "@/lib/app";
 import { DomainError } from "@/lib/service";
 import { CATALOGUE } from "@/lib/ai/catalogue";
 import { describeDose } from "@/lib/format";
@@ -24,14 +25,20 @@ export const dynamic = "force-dynamic";
 
 const when = (iso: string) => new Date(iso).toLocaleString("en-GB", { timeZone: "Europe/London", dateStyle: "medium", timeStyle: "short" });
 
-export default async function ConsultPage({ params }: { params: Promise<{ id: string }> }) {
+type Props = { params: Promise<{ id: string }> };
+
+export default async function ConsultPage(props: Props) {
   const user = await requireUser(["owner", "clinician"]);
+  return withClinic(user.clinicId, () => ConsultPageBody(props, user));
+}
+
+async function ConsultPageBody({ params }: Props, user: SessionUser) {
   const { id } = await params;
   const svc = getService(user.clinicId);
 
   let c;
   try {
-    c = svc.getConsult(id);
+    c = await svc.getConsult(id);
   } catch (err) {
     if (err instanceof DomainError && err.code === "not_found") notFound();
     throw err;
@@ -195,8 +202,8 @@ export default async function ConsultPage({ params }: { params: Promise<{ id: st
                 );
               })}
               <h3>Copy-ready note</h3>
-              <pre className="transcript mono card" style={{ background: "var(--bg)" }}>{svc.approvedNoteText(id)}</pre>
-              <CopyButton text={svc.approvedNoteText(id)} />
+              <pre className="transcript mono card" style={{ background: "var(--bg)" }}>{await svc.approvedNoteText(id)}</pre>
+              <CopyButton text={await svc.approvedNoteText(id)} />
             </section>
 
             <section className="card">

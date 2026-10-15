@@ -16,28 +16,28 @@ async function expectCode(promise: Promise<unknown> | (() => unknown), code: str
 
 describe("R1 consent", () => {
   it("blocks transcript capture and drafting until consent is recorded", async () => {
-    const s = setup();
-    const id = s.service.createConsult({ patientLabel: "J.B.", practitioner: "Sam" }, "sam");
+    const s = await setup();
+    const id = await s.service.createConsult({ patientLabel: "J.B.", practitioner: "Sam" }, "sam");
     await expectCode(() => s.service.saveTranscript(id, TRANSCRIPT, "sam"), "consent_required");
     await expectCode(s.service.generateDrafts(id, "sam"), "consent_required");
   });
 
-  it("logs consent once and keeps the first record", () => {
-    const s = setup();
-    const id = s.service.createConsult({ patientLabel: "J.B.", practitioner: "Sam" }, "sam");
-    s.service.recordConsent(id, { method: "verbal", by: "Sam" }, "sam");
+  it("logs consent once and keeps the first record", async () => {
+    const s = await setup();
+    const id = await s.service.createConsult({ patientLabel: "J.B.", practitioner: "Sam" }, "sam");
+    await s.service.recordConsent(id, { method: "verbal", by: "Sam" }, "sam");
     s.clock.now = new Date("2026-10-12T11:00:00Z");
-    s.service.recordConsent(id, { method: "written", by: "Other" }, "other");
-    const view = s.service.getConsult(id);
+    await s.service.recordConsent(id, { method: "written", by: "Other" }, "other");
+    const view = await s.service.getConsult(id);
     expect(view.consent).toMatchObject({ method: "verbal", by: "Sam", at: "2026-10-12T10:00:00.000Z" });
     expect(view.audit.filter((a) => a.action === "consent.recorded")).toHaveLength(1);
   });
 
   it("deletes the transcript and drafts when consent is withdrawn", async () => {
-    const s = setup();
+    const s = await setup();
     const id = await draftedConsult(s);
-    s.service.withdrawConsent(id, "sam");
-    const view = s.service.getConsult(id);
+    await s.service.withdrawConsent(id, "sam");
+    const view = await s.service.getConsult(id);
     expect(view.status).toBe("created");
     expect(view.transcript).toBe("");
     expect(view.note.problems).toHaveLength(0);
@@ -46,19 +46,19 @@ describe("R1 consent", () => {
   });
 
   it("will not withdraw consent on an approved record", async () => {
-    const s = setup();
+    const s = await setup();
     const id = await draftedConsult(s);
-    confirmScreening(s, id);
-    s.service.approve(id, "Sam Physio");
+    await confirmScreening(s, id);
+    await s.service.approve(id, "Sam Physio");
     await expectCode(() => s.service.withdrawConsent(id, "sam"), "invalid_state");
   });
 });
 
 describe("R2 and R4 drafting", () => {
   it("produces discrete note fields and exercises linked to problems", async () => {
-    const s = setup();
+    const s = await setup();
     const id = await draftedConsult(s);
-    const view = s.service.getConsult(id);
+    const view = await s.service.getConsult(id);
     expect(view.status).toBe("drafted");
     expect(view.note.problems.map((p) => p.id)).toEqual(["p1"]);
     expect(view.note.problems[0].side).toBe("left");
@@ -75,7 +75,7 @@ describe("R2 and R4 drafting", () => {
   });
 
   it("never lets the model confirm red-flag screening", async () => {
-    const s = setup({
+    const s = await setup({
       provider: {
         name: "cheeky",
         model: "m",
@@ -97,11 +97,11 @@ describe("R2 and R4 drafting", () => {
       },
     });
     const id = await draftedConsult(s);
-    expect(s.service.getConsult(id).note.redFlags.screened).toBe(false);
+    expect((await s.service.getConsult(id)).note.redFlags.screened).toBe(false);
   });
 
   it("drops invented exercises and unlinked items, and says so in the audit log", async () => {
-    const s = setup({
+    const s = await setup({
       provider: {
         name: "sloppy",
         model: "m",
@@ -133,7 +133,7 @@ describe("R2 and R4 drafting", () => {
       },
     });
     const id = await draftedConsult(s);
-    const view = s.service.getConsult(id);
+    const view = await s.service.getConsult(id);
     expect(view.programme.items.map((i) => i.exerciseId)).toEqual(["quad-set"]);
     expect(view.note.rom[0].evidence).toEqual([1]);
     const audit = view.audit.find((a) => a.action === "drafts.generated");
@@ -141,28 +141,28 @@ describe("R2 and R4 drafting", () => {
   });
 
   it("rejects malformed provider output without storing anything", async () => {
-    const s = setup({ provider: { name: "bad", model: "m", isMock: false, draft: async () => ({ nope: true }) } });
-    const id = s.service.createConsult({ patientLabel: "J.B.", practitioner: "Sam" }, "sam");
-    s.service.recordConsent(id, { method: "verbal", by: "Sam" }, "sam");
-    s.service.saveTranscript(id, TRANSCRIPT, "sam");
+    const s = await setup({ provider: { name: "bad", model: "m", isMock: false, draft: async () => ({ nope: true }) } });
+    const id = await s.service.createConsult({ patientLabel: "J.B.", practitioner: "Sam" }, "sam");
+    await s.service.recordConsent(id, { method: "verbal", by: "Sam" }, "sam");
+    await s.service.saveTranscript(id, TRANSCRIPT, "sam");
     await expectCode(s.service.generateDrafts(id, "sam"), "draft_failed");
-    expect(s.service.getConsult(id).status).toBe("captured");
+    expect((await s.service.getConsult(id)).status).toBe("captured");
   });
 
-  it("lets a physio write the note by hand when there is no AI draft", () => {
-    const s = setup();
-    const id = s.service.createConsult({ patientLabel: "J.B.", practitioner: "Sam" }, "sam");
-    s.service.recordConsent(id, { method: "verbal", by: "Sam" }, "sam");
-    const v = s.service.getConsult(id);
-    s.service.saveDrafts(id, { note: { ...v.note, subjective: "Knee pain", redFlags: { screened: true, findings: [], notes: "" } }, programme: v.programme }, "sam");
-    expect(s.service.getConsult(id).status).toBe("drafted");
-    expect(() => s.service.approve(id, "Sam")).not.toThrow();
+  it("lets a physio write the note by hand when there is no AI draft", async () => {
+    const s = await setup();
+    const id = await s.service.createConsult({ patientLabel: "J.B.", practitioner: "Sam" }, "sam");
+    await s.service.recordConsent(id, { method: "verbal", by: "Sam" }, "sam");
+    const v = await s.service.getConsult(id);
+    await s.service.saveDrafts(id, { note: { ...v.note, subjective: "Knee pain", redFlags: { screened: true, findings: [], notes: "" } }, programme: v.programme }, "sam");
+    expect((await s.service.getConsult(id)).status).toBe("drafted");
+    await s.service.approve(id, "Sam");
   });
 });
 
 describe("R3 approval gate", () => {
   it("sends and saves nothing before approval", async () => {
-    const s = setup();
+    const s = await setup();
     const id = await draftedConsult(s);
     await expectCode(() => s.service.createPatientLink(id, "sam"), "invalid_state");
     await expectCode(() => s.service.approvedNoteText(id), "invalid_state");
@@ -171,10 +171,10 @@ describe("R3 approval gate", () => {
   });
 
   it("requires red-flag screening to be confirmed", async () => {
-    const s = setup();
+    const s = await setup();
     const id = await draftedConsult(s);
     try {
-      s.service.approve(id, "Sam");
+      await s.service.approve(id, "Sam");
       throw new Error("should not approve");
     } catch (err) {
       expect(err).toBeInstanceOf(DomainError);
@@ -183,10 +183,10 @@ describe("R3 approval gate", () => {
   });
 
   it("blocks approval when an exercise is not linked to a problem", async () => {
-    const s = setup();
+    const s = await setup();
     const id = await draftedConsult(s);
-    const v = s.service.getConsult(id);
-    s.service.saveDrafts(
+    const v = await s.service.getConsult(id);
+    await s.service.saveDrafts(
       id,
       {
         note: { ...v.note, redFlags: { ...v.note.redFlags, screened: true } },
@@ -198,23 +198,23 @@ describe("R3 approval gate", () => {
   });
 
   it("freezes the approved content and keeps a hash of it", async () => {
-    const s = setup();
+    const s = await setup();
     const id = await draftedConsult(s);
-    confirmScreening(s, id);
-    const { hash } = s.service.approve(id, "Sam Physio");
+    await confirmScreening(s, id);
+    const { hash } = await s.service.approve(id, "Sam Physio");
     expect(hash).toMatch(/^[0-9a-f]{64}$/);
     await expectCode(() => s.service.saveDrafts(id, { note: {}, programme: {} }, "sam"), "invalid_state");
     await expectCode(() => s.service.saveTranscript(id, "changed", "sam"), "invalid_state");
-    expect(s.service.getConsult(id).approval?.hash).toBe(hash);
+    expect((await s.service.getConsult(id)).approval?.hash).toBe(hash);
     await expectCode(() => s.service.approve(id, "Sam"), "invalid_state");
   });
 
   it("labels the copy-ready note as AI-assisted and approved", async () => {
-    const s = setup();
+    const s = await setup();
     const id = await draftedConsult(s);
-    confirmScreening(s, id);
-    s.service.approve(id, "Sam Physio");
-    const text = s.service.approvedNoteText(id);
+    await confirmScreening(s, id);
+    await s.service.approve(id, "Sam Physio");
+    const text = await s.service.approvedNoteText(id);
     expect(text).toContain("Drafted with AI assistance (mock-keyword-v1), reviewed and approved by Sam Physio");
     expect(text).toContain("Range of movement");
     expect(text).toContain("Home exercise programme issued");
@@ -223,17 +223,17 @@ describe("R3 approval gate", () => {
 
 describe("R6 patient link and R8 check-in", () => {
   async function approved() {
-    const s = setup();
+    const s = await setup();
     const id = await draftedConsult(s);
-    confirmScreening(s, id);
-    s.service.approve(id, "Sam Physio");
+    await confirmScreening(s, id);
+    await s.service.approve(id, "Sam Physio");
     return { s, id };
   }
 
   it("shows the patient the programme only, never the clinical note", async () => {
     const { s, id } = await approved();
-    const { token } = s.service.createPatientLink(id, "sam");
-    const view = s.service.getPatientView(token)!;
+    const { token } = await s.service.createPatientLink(id, "sam");
+    const view = (await s.service.getPatientView(token))!;
     expect(view.programme.items.length).toBeGreaterThan(0);
     const json = JSON.stringify(view);
     expect(json).not.toContain("MOCK DRAFT");
@@ -243,58 +243,54 @@ describe("R6 patient link and R8 check-in", () => {
 
   it("stores only a hash of the token", async () => {
     const { s, id } = await approved();
-    const { token } = s.service.createPatientLink(id, "sam");
-    const rows = JSON.stringify(
-      (s as unknown as { service: { db: { prepare: (q: string) => { all: () => unknown[] } } } }).service.db
-        .prepare("SELECT * FROM patient_links")
-        .all(),
-    );
+    const { token } = await s.service.createPatientLink(id, "sam");
+    const rows = JSON.stringify(await s.q.all("SELECT * FROM patient_links"));
     expect(rows).not.toContain(token);
   });
 
   it("can be revoked and replaced, and expires", async () => {
     const { s, id } = await approved();
-    const first = s.service.createPatientLink(id, "sam");
-    const second = s.service.createPatientLink(id, "sam");
-    expect(s.service.getPatientView(first.token)).toBeNull();
-    expect(s.service.getPatientView(second.token)).not.toBeNull();
-    s.service.revokePatientLinks(id, "sam");
-    expect(s.service.getPatientView(second.token)).toBeNull();
+    const first = await s.service.createPatientLink(id, "sam");
+    const second = await s.service.createPatientLink(id, "sam");
+    expect(await s.service.getPatientView(first.token)).toBeNull();
+    expect(await s.service.getPatientView(second.token)).not.toBeNull();
+    await s.service.revokePatientLinks(id, "sam");
+    expect(await s.service.getPatientView(second.token)).toBeNull();
 
-    const third = s.service.createPatientLink(id, "sam", 7);
+    const third = await s.service.createPatientLink(id, "sam", 7);
     s.clock.now = new Date("2026-10-20T10:00:00Z");
-    expect(s.service.getPatientView(third.token)).toBeNull();
+    expect(await s.service.getPatientView(third.token)).toBeNull();
   });
 
   it("rejects unknown tokens", async () => {
     const { s } = await approved();
-    expect(s.service.getPatientView("nope")).toBeNull();
-    expect(s.service.getPatientView("x".repeat(500))).toBeNull();
+    expect(await s.service.getPatientView("nope")).toBeNull();
+    expect(await s.service.getPatientView("x".repeat(500))).toBeNull();
   });
 
   it("records a two-tap check-in and limits spam", async () => {
     const { s, id } = await approved();
-    const { token } = s.service.createPatientLink(id, "sam");
-    for (let i = 0; i < 5; i++) s.service.submitCheckIn(token, { adherence: "some", painChange: "better" });
+    const { token } = await s.service.createPatientLink(id, "sam");
+    for (let i = 0; i < 5; i++) await s.service.submitCheckIn(token, { adherence: "some", painChange: "better" });
     await expectCode(() => s.service.submitCheckIn(token, { adherence: "all", painChange: "same" }), "rate_limited");
-    expect(s.service.getConsult(id).checkIns).toHaveLength(5);
+    expect((await s.service.getConsult(id)).checkIns).toHaveLength(5);
     s.clock.now = new Date("2026-10-13T11:00:00Z");
-    expect(() => s.service.submitCheckIn(token, { adherence: "all", painChange: "same" })).not.toThrow();
+    await s.service.submitCheckIn(token, { adherence: "all", painChange: "same" });
   });
 
   it("rejects invalid check-in values", async () => {
     const { s, id } = await approved();
-    const { token } = s.service.createPatientLink(id, "sam");
+    const { token } = await s.service.createPatientLink(id, "sam");
     await expectCode(() => s.service.submitCheckIn(token, { adherence: "lots", painChange: "better" }), "validation");
   });
 });
 
 describe("R5 write-back", () => {
   async function approved() {
-    const s = setup();
+    const s = await setup();
     const id = await draftedConsult(s);
-    confirmScreening(s, id);
-    s.service.approve(id, "Sam Physio");
+    await confirmScreening(s, id);
+    await s.service.approve(id, "Sam Physio");
     return { s, id };
   }
 
@@ -319,39 +315,36 @@ describe("R5 write-back", () => {
     expect(second.id).toBe(first.id);
     expect(second.status).toBe("succeeded");
     expect(second.attempts).toBe(2);
-    expect(s.service.getConsult(id).writebacks).toHaveLength(1);
+    expect((await s.service.getConsult(id)).writebacks).toHaveLength(1);
   });
 
   it("stops and asks a person to check after an attempt that never reported back", async () => {
-    const { s, id, db } = await (async () => {
-      const x = await approved();
-      return { ...x, db: x.s.db };
-    })();
+    const { s, id } = await approved();
     s.target.hang = true;
     // simulate a crash: the row stays 'pending' although the process died mid-call
     const row = await s.service.writeBack(id, "cliniko", "sam");
-    db.prepare("UPDATE writebacks SET status = 'pending' WHERE id = ?").run(row.id);
+    (await s.q.run("UPDATE writebacks SET status = 'pending' WHERE id = ?", [row.id]));
     const callsBefore = s.target.calls.length;
     const again = await s.service.writeBack(id, "cliniko", "sam");
     expect(again.status).toBe("needs_check");
     expect(s.target.calls).toHaveLength(callsBefore);
 
-    s.service.resolveWriteback(id, "cliniko", "not_written", "sam");
+    await s.service.resolveWriteback(id, "cliniko", "not_written", "sam");
     s.target.hang = false;
     const retried = await s.service.writeBack(id, "cliniko", "sam");
     expect(retried.status).toBe("succeeded");
   });
 
   it("needs a patient id and a configured destination", async () => {
-    const s = setup();
-    const id = s.service.createConsult({ patientLabel: "J.B.", practitioner: "Sam" }, "sam");
-    s.service.recordConsent(id, { method: "verbal", by: "Sam" }, "sam");
-    s.service.saveTranscript(id, TRANSCRIPT, "sam");
+    const s = await setup();
+    const id = await s.service.createConsult({ patientLabel: "J.B.", practitioner: "Sam" }, "sam");
+    await s.service.recordConsent(id, { method: "verbal", by: "Sam" }, "sam");
+    await s.service.saveTranscript(id, TRANSCRIPT, "sam");
     await s.service.generateDrafts(id, "sam");
-    confirmScreening(s, id);
-    s.service.approve(id, "Sam");
+    await confirmScreening(s, id);
+    await s.service.approve(id, "Sam");
     await expectCode(s.service.writeBack(id, "cliniko", "sam"), "validation");
-    s.service.setPmsPatientId(id, "99", "sam");
+    await s.service.setPmsPatientId(id, "99", "sam");
     s.target.configured = false;
     await expectCode(s.service.writeBack(id, "cliniko", "sam"), "writeback_unavailable");
   });

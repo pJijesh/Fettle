@@ -5,8 +5,8 @@ import { ActionForm } from "../Forms";
 
 export const dynamic = "force-dynamic";
 
-export default function SetupPage() {
-  if (getAccounts().hasUsers()) redirect("/login");
+export default async function SetupPage() {
+  if (await getAccounts().hasUsers()) redirect("/login");
   return (
     <main className="narrow">
       <h1>Set up your clinic</h1>

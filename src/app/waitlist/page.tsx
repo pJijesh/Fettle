@@ -1,6 +1,7 @@
 import Link from "next/link";
 import { requireUser } from "@/lib/auth";
-import { getPlatform } from "@/lib/app";
+import type { SessionUser } from "@/lib/accounts";
+import { getPlatform, withClinic } from "@/lib/app";
 import { removeWaitlistAction } from "../actions/staff";
 import { ActionForm } from "../Forms";
 import { Header } from "../Header";
@@ -10,7 +11,11 @@ const WD = ["Mon", "Tue", "Wed", "Thu", "Fri", "Sat", "Sun"];
 
 export default async function WaitlistPage() {
   const user = await requireUser();
-  const list = getPlatform().waitlist.list(user.clinicId);
+  return withClinic(user.clinicId, () => WaitlistPageBody(user));
+}
+
+async function WaitlistPageBody(user: SessionUser) {
+  const list = await getPlatform().waitlist.list(user.clinicId);
   return (
     <>
       <Header user={user} />

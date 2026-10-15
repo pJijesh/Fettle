@@ -1,13 +1,18 @@
 import Link from "next/link";
 import { requireUser } from "@/lib/auth";
-import { getService } from "@/lib/app";
+import type { SessionUser } from "@/lib/accounts";
+import { getService, withClinic } from "@/lib/app";
 import { Header } from "../Header";
 
 export const dynamic = "force-dynamic";
 
 export default async function Consultations() {
   const user = await requireUser(["owner", "clinician"]);
-  const consults = getService(user.clinicId).listConsults();
+  return withClinic(user.clinicId, () => ConsultationsBody(user));
+}
+
+async function ConsultationsBody(user: SessionUser) {
+  const consults = await getService(user.clinicId).listConsults();
   return (
     <>
       <Header user={user} />

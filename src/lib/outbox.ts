@@ -53,53 +53,77 @@ export class Outbox {
   ) {}
 
   /** Returns true when queued, false when the same key was queued before. */
-  queue(m: QueueInput): boolean {
-    const now = this.now().toISOString();
-    const res = this.db
-      .prepare(
-        `INSERT OR IGNORE INTO outbox (id, clinic_id, channel, to_addr, subject, body, kind, status, attempts, send_after, idempotency_key, created_at)
-         VALUES (?, ?, ?, ?, ?, ?, ?, 'queued', 0, ?, ?, ?)`,
-      )
-      .run(crypto.randomUUID(), m.clinicId, m.channel, m.to, m.subject ?? "", m.body, m.kind, (m.sendAfter ?? this.now()).toISOString(), m.key, now);
-    return Number(res.changes) === 1;
+  async queue(m: QueueInput): Promise<boolean> {
+    return this.db.scope(m.clinicId, async () => {
+      const n = await this.db.run(
+        `INSERT INTO outbox (id, clinic_id, channel, to_addr, subject, body, kind, status, attempts, send_after, idempotency_key, created_at)
+         VALUES (?, ?, ?, ?, ?, ?, ?, 'queued', 0, ?, ?, ?)
+         ON CONFLICT (idempotency_key) DO NOTHING`,
+        [crypto.randomUUID(), m.clinicId, m.channel, m.to, m.subject ?? "", m.body, m.kind, (m.sendAfter ?? this.now()).toISOString(), m.key, this.now().toISOString()],
+      );
+      return n === 1;
+    });
   }
 
-  /** Sends what is due. A failure is retried later with a growing delay and gives up after five tries. */
-  async deliverDue(mailer: Mailer, limit = 50): Promise<{ sent: number; failed: number }> {
-    const rows = this.db
-      .prepare("SELECT * FROM outbox WHERE status = 'queued' AND send_after <= ? ORDER BY send_after LIMIT ?")
-      .all(this.now().toISOString(), limit) as unknown as {
-      id: string; clinic_id: string; channel: "email" | "sms"; to_addr: string; subject: string; body: string; kind: string; attempts: number;
-    }[];
-    let sent = 0;
-    let failed = 0;
-    for (const r of rows) {
-      // Claim the row first so two workers never send the same message.
-      const claim = this.db.prepare("UPDATE outbox SET attempts = attempts + 1 WHERE id = ? AND status = 'queued' AND attempts = ?").run(r.id, r.attempts);
-      if (!Number(claim.changes)) continue;
+  /**
+   * Sends what is due for one clinic. A failure is retried later with a growing delay and gives up after five tries.
+   * Three steps, so a database connection is never held open while a provider is being called: claim the rows,
+   * send them, record the results.
+   */
+  async deliverDue(clinicId: string, mailer: Mailer, limit = 50): Promise<{ sent: number; failed: number }> {
+    type Due = { id: string; clinic_id: string; channel: "email" | "sms"; to_addr: string; subject: string; body: string; kind: string; attempts: number };
+    const claimed = await this.db.scope(clinicId, async () => {
+      const rows = await this.db.all<Due>("SELECT * FROM outbox WHERE status = 'queued' AND send_after <= ? ORDER BY send_after, seq LIMIT ? FOR UPDATE SKIP LOCKED", [
+        this.now().toISOString(),
+        limit,
+      ]);
+      const mine: Due[] = [];
+      for (const r of rows) {
+        // Count the attempt before sending, so a crash mid-send is counted and retried, never forgotten.
+        const n = await this.db.run("UPDATE outbox SET attempts = attempts + 1 WHERE id = ? AND status = 'queued' AND attempts = ?", [r.id, r.attempts]);
+        if (n) mine.push(r);
+      }
+      return mine;
+    });
+
+    const results: { r: Due; error: string | null }[] = [];
+    for (const r of claimed) {
       try {
         await mailer.send({ id: r.id, clinicId: r.clinic_id, channel: r.channel, to: r.to_addr, subject: r.subject, body: r.body, kind: r.kind });
-        this.db.prepare("UPDATE outbox SET status = 'sent', sent_at = ?, error = NULL WHERE id = ?").run(this.now().toISOString(), r.id);
-        sent++;
+        results.push({ r, error: null });
       } catch (err) {
-        failed++;
-        const attempts = r.attempts + 1;
-        const give = attempts >= MAX_ATTEMPTS;
-        const next = new Date(this.now().getTime() + attempts * attempts * 60_000).toISOString();
-        this.db
-          .prepare("UPDATE outbox SET status = ?, error = ?, send_after = ? WHERE id = ?")
-          .run(give ? "failed" : "queued", String(err instanceof Error ? err.message : err).slice(0, 300), next, r.id);
+        results.push({ r, error: String(err instanceof Error ? err.message : err).slice(0, 300) });
       }
     }
+
+    let sent = 0;
+    let failed = 0;
+    await this.db.scope(clinicId, async () => {
+      for (const { r, error } of results) {
+        if (error === null) {
+          await this.db.run("UPDATE outbox SET status = 'sent', sent_at = ?, error = NULL WHERE id = ?", [this.now().toISOString(), r.id]);
+          sent++;
+        } else {
+          failed++;
+          const attempts = r.attempts + 1;
+          const give = attempts >= MAX_ATTEMPTS;
+          const next = new Date(this.now().getTime() + attempts * attempts * 60_000).toISOString();
+          await this.db.run("UPDATE outbox SET status = ?, error = ?, send_after = ? WHERE id = ?", [give ? "failed" : "queued", error, next, r.id]);
+        }
+      }
+    });
     return { sent, failed };
   }
 
   list(clinicId: string, limit = 100) {
-    return this.db
-      .prepare("SELECT id, channel, to_addr, subject, body, kind, status, attempts, error, send_after, sent_at FROM outbox WHERE clinic_id = ? ORDER BY created_at DESC, rowid DESC LIMIT ?")
-      .all(clinicId, limit) as unknown as {
-      id: string; channel: string; to_addr: string; subject: string; body: string; kind: string; status: string;
-      attempts: number; error: string | null; send_after: string; sent_at: string | null;
-    }[];
+    return this.db.scope(clinicId, () =>
+      this.db.all<{
+        id: string; channel: string; to_addr: string; subject: string; body: string; kind: string; status: string;
+        attempts: number; error: string | null; send_after: string; sent_at: string | null;
+      }>(
+        "SELECT id, channel, to_addr, subject, body, kind, status, attempts, error, send_after, sent_at FROM outbox WHERE clinic_id = ? ORDER BY created_at DESC, seq DESC LIMIT ?",
+        [clinicId, limit],
+      ),
+    );
   }
 }

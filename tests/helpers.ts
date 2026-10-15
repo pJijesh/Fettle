@@ -1,4 +1,5 @@
-import { openDb } from "@/lib/db";
+import { afterEach } from "vitest";
+import { createTestDb, type TestDb } from "./testdb";
 import { Service } from "@/lib/service";
 import { MockProvider } from "@/lib/ai/mock";
 import type { DraftingProvider } from "@/lib/ai/provider";
@@ -32,8 +33,22 @@ export class FakeTarget implements WritebackTarget {
   }
 }
 
-export function setup(opts: { provider?: DraftingProvider } = {}) {
-  const db = openDb(":memory:");
+const open: TestDb[] = [];
+afterEach(async () => {
+  await Promise.all(open.splice(0).map((t) => t.drop()));
+});
+
+/** A fresh real Postgres database for the test, dropped when it ends. */
+export async function newTestDb(): Promise<TestDb> {
+  const t = await createTestDb();
+  open.push(t);
+  return t;
+}
+
+export async function setup(opts: { provider?: DraftingProvider } = {}) {
+  const t = await newTestDb();
+  const db = t.db;
+  await t.q.run("INSERT INTO clinics (id, name, slug, created_at) VALUES ('clinic-1', 'Test Physio', 'test', '2026-10-12T00:00:00.000Z')");
   const target = new FakeTarget();
   const clock = { now: new Date("2026-10-12T10:00:00Z") };
   const service = new Service({
@@ -43,21 +58,23 @@ export function setup(opts: { provider?: DraftingProvider } = {}) {
     targets: { cliniko: target },
     now: () => clock.now,
   });
-  return { db, service, target, clock };
+  return { db, q: t.q, t, service, target, clock };
 }
 
 /** Runs a consultation through to the point where it can be approved. */
-export async function draftedConsult(s: ReturnType<typeof setup>) {
-  const id = s.service.createConsult({ patientLabel: "J.B.", practitioner: "Sam Physio", pmsPatientId: "12345" }, "sam");
-  s.service.recordConsent(id, { method: "verbal", by: "Sam Physio" }, "sam");
-  s.service.saveTranscript(id, TRANSCRIPT, "sam");
+export type Setup = Awaited<ReturnType<typeof setup>>;
+
+export async function draftedConsult(s: Setup) {
+  const id = await s.service.createConsult({ patientLabel: "J.B.", practitioner: "Sam Physio", pmsPatientId: "12345" }, "sam");
+  await s.service.recordConsent(id, { method: "verbal", by: "Sam Physio" }, "sam");
+  await s.service.saveTranscript(id, TRANSCRIPT, "sam");
   await s.service.generateDrafts(id, "sam");
   return id;
 }
 
-export function confirmScreening(s: ReturnType<typeof setup>, id: string) {
-  const view = s.service.getConsult(id);
-  s.service.saveDrafts(
+export async function confirmScreening(s: Setup, id: string) {
+  const view = await s.service.getConsult(id);
+  await s.service.saveDrafts(
     id,
     { note: { ...view.note, redFlags: { ...view.note.redFlags, screened: true } }, programme: view.programme },
     "sam",
