@@ -1,4 +1,5 @@
 import type { Db } from "./db";
+import { logError } from "./log";
 import { Accounts } from "./accounts";
 import { Booking } from "./booking";
 import { Forms } from "./forms";
@@ -6,6 +7,7 @@ import { Ical } from "./ical";
 import { Importer } from "./importer";
 import { Notifier } from "./notify";
 import { DevMailer, Outbox, type Mailer } from "./outbox";
+import { Reports } from "./reports";
 import { Scheduling } from "./scheduling";
 import { Waitlist } from "./waitlist";
 
@@ -24,6 +26,9 @@ export function createPlatform(db: Db, opts: { now?: () => Date; baseUrl?: () =>
   const booking = new Booking(db, scheduling, forms, notifier, now);
   const ical = new Ical(db, now);
   const importer = new Importer(db, scheduling, now);
+  const reports = new Reports(db, now);
+
+  accounts.setResetHook((m) => notifier.passwordReset(m.clinicId, m.to, m.name, m.token).then(() => undefined));
 
   // Hooks run inside the transaction of the booking, move or cancellation that triggered them, so the
   // appointment, its intake forms, its message and any waiting-list offers are saved together or not at all.
@@ -81,13 +86,13 @@ export function createPlatform(db: Db, opts: { now?: () => Date; baseUrl?: () =>
         total.failed += delivered.failed;
       } catch (err) {
         total.errors++;
-        console.error(`Background work failed for clinic ${clinicId}:`, err);
+        logError(`tick:${clinicId}`, err);
       }
     }
     return total;
   }
 
-  return { db, now, accounts, scheduling, forms, booking, waitlist, outbox, notifier, ical, importer, mailer, tick, baseUrl };
+  return { db, now, accounts, scheduling, forms, booking, waitlist, outbox, notifier, ical, importer, reports, mailer, tick, baseUrl };
 }
 
 export type Platform = ReturnType<typeof createPlatform>;

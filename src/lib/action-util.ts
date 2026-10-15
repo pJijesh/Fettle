@@ -1,5 +1,6 @@
 import { headers } from "next/headers";
 import { DomainError } from "./errors";
+import { logError } from "./log";
 import type { Issue } from "./validation";
 
 export interface ActionState {
@@ -13,7 +14,7 @@ export interface ActionState {
 
 export function fail(err: unknown): ActionState {
   if (err instanceof DomainError) return { ok: false, message: err.message, issues: err.issues };
-  console.error(err);
+  logError("action", err);
   return { ok: false, message: "Something went wrong. Nothing was changed that you need to redo; try again." };
 }
 

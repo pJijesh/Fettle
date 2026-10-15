@@ -10,7 +10,7 @@ import { PORTAL_COOKIE, clientKey, cookieSecure, fail, field, type ActionState }
 const tooMany: ActionState = { ok: false, message: "Too many attempts. Please wait a few minutes and try again." };
 
 export async function bookAction(_prev: ActionState, form: FormData): Promise<ActionState> {
-  if (!allow(`book:${await clientKey()}`, 10, 15 * 60_000)) return tooMany;
+  if (!(await allow(`book:${await clientKey()}`, 10, 15 * 60_000))) return tooMany;
   const slug = field(form, "slug");
   let token: string;
   try {
@@ -27,7 +27,7 @@ export async function bookAction(_prev: ActionState, form: FormData): Promise<Ac
 }
 
 export async function patientCancelAction(_prev: ActionState, form: FormData): Promise<ActionState> {
-  if (!allow(`manage:${await clientKey()}`, 30, 15 * 60_000)) return tooMany;
+  if (!(await allow(`manage:${await clientKey()}`, 30, 15 * 60_000))) return tooMany;
   const token = field(form, "token");
   try {
     await getPlatform().booking.cancelByPatient(token);
@@ -38,7 +38,7 @@ export async function patientCancelAction(_prev: ActionState, form: FormData): P
 }
 
 export async function patientRescheduleAction(_prev: ActionState, form: FormData): Promise<ActionState> {
-  if (!allow(`manage:${await clientKey()}`, 30, 15 * 60_000)) return tooMany;
+  if (!(await allow(`manage:${await clientKey()}`, 30, 15 * 60_000))) return tooMany;
   const token = field(form, "token");
   try {
     await getPlatform().booking.rescheduleByPatient(token, field(form, "startAt"));
@@ -49,7 +49,7 @@ export async function patientRescheduleAction(_prev: ActionState, form: FormData
 }
 
 export async function submitFormAction(_prev: ActionState, form: FormData): Promise<ActionState> {
-  if (!allow(`form:${await clientKey()}`, 30, 15 * 60_000)) return tooMany;
+  if (!(await allow(`form:${await clientKey()}`, 30, 15 * 60_000))) return tooMany;
   const token = field(form, "token");
   const answers: Record<string, string> = {};
   for (const [k, v] of form.entries()) if (typeof v === "string" && k.startsWith("q_")) answers[k.slice(2)] = v;
@@ -62,7 +62,7 @@ export async function submitFormAction(_prev: ActionState, form: FormData): Prom
 }
 
 export async function acceptOfferAction(_prev: ActionState, form: FormData): Promise<ActionState> {
-  if (!allow(`offer:${await clientKey()}`, 20, 15 * 60_000)) return tooMany;
+  if (!(await allow(`offer:${await clientKey()}`, 20, 15 * 60_000))) return tooMany;
   let manage: string;
   try {
     const { appointmentId } = await getPlatform().waitlist.accept(field(form, "token"));
@@ -76,7 +76,7 @@ export async function acceptOfferAction(_prev: ActionState, form: FormData): Pro
 export async function portalRequestCodeAction(_prev: ActionState, form: FormData): Promise<ActionState> {
   const slug = field(form, "slug");
   const email = field(form, "email").trim().toLowerCase();
-  if (!allow(`portal:code:ip:${await clientKey()}`, 10, 15 * 60_000) || !allow(`portal:code:${email}`, 5, 60 * 60_000)) return tooMany;
+  if (!(await allow(`portal:code:ip:${await clientKey()}`, 10, 15 * 60_000)) || !(await allow(`portal:code:${email}`, 5, 60 * 60_000))) return tooMany;
   await getPlatform().booking.requestCode(slug, email);
   redirect(`/portal/${slug}/code?email=${encodeURIComponent(email)}`);
 }
@@ -84,7 +84,7 @@ export async function portalRequestCodeAction(_prev: ActionState, form: FormData
 export async function portalVerifyAction(_prev: ActionState, form: FormData): Promise<ActionState> {
   const slug = field(form, "slug");
   const email = field(form, "email").trim().toLowerCase();
-  if (!allow(`portal:verify:ip:${await clientKey()}`, 20, 15 * 60_000) || !allow(`portal:verify:${email}`, 10, 15 * 60_000)) return tooMany;
+  if (!(await allow(`portal:verify:ip:${await clientKey()}`, 20, 15 * 60_000)) || !(await allow(`portal:verify:${email}`, 10, 15 * 60_000))) return tooMany;
   try {
     const { token } = await getPlatform().booking.verifyCode(slug, email, field(form, "code"));
     (await cookies()).set(PORTAL_COOKIE, token, { httpOnly: true, sameSite: "lax", secure: cookieSecure(), path: "/", maxAge: 2 * 3600 });

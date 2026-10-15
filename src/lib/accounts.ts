@@ -1,5 +1,5 @@
 import crypto from "node:crypto";
-import { Fail, isUniqueViolation, type Db } from "./db";
+import { Fail, clinicOf, isUniqueViolation, type Db } from "./db";
 import {
   DUMMY_HASH,
   generateTotpSecret,
@@ -33,6 +33,25 @@ const SESSION_HOURS = 12;
 const MAX_FAILED = 5;
 const LOCK_MINUTES = 15;
 const BAD_LOGIN = "Email or password is not right.";
+const RESET_MINUTES = 60;
+const RECOVERY_CODE_COUNT = 10;
+const BAD_RESET = "This reset link has expired or already been used. Ask for a new one.";
+const RECOVERY_SHAPE = /^[a-z0-9]{5}-?[a-z0-9]{5}$/;
+// No 0/o/1/l/i, so a code read from paper is hard to get wrong.
+const RECOVERY_ALPHABET = "abcdefghjkmnpqrstuvwxyz23456789";
+
+export interface ResetMail {
+  clinicId: string;
+  to: string;
+  name: string;
+  token: string;
+}
+
+function newRecoveryCode(): string {
+  const bytes = crypto.randomBytes(10);
+  const chars = Array.from(bytes, (b) => RECOVERY_ALPHABET[b % RECOVERY_ALPHABET.length]).join("");
+  return `${chars.slice(0, 5)}-${chars.slice(5)}`;
+}
 
 interface UserRow {
   id: string;
@@ -66,6 +85,13 @@ export class Accounts {
 
   private ts() {
     return this.now().toISOString();
+  }
+
+  private resetHook?: (m: ResetMail) => Promise<void>;
+
+  /** Called inside the transaction that records a reset request, so the request and its email are saved together. */
+  setResetHook(fn: (m: ResetMail) => Promise<void>) {
+    this.resetHook = fn;
   }
 
   private async audit(clinicId: string, actor: string, action: string, detail?: unknown) {
@@ -262,7 +288,7 @@ export class Accounts {
   }
 
   /** Checks a code. When enrolling, a correct code turns two-step sign-in on. Marks the session complete. */
-  async verifyMfa(token: string, code: string): Promise<void> {
+  async verifyMfa(token: string, code: string): Promise<{ enrolled: boolean }> {
     const info = await this.getSession(token);
     if (!info) throw new DomainError("unauthenticated", "Sign in again");
     // A wrong code must stay counted towards the lock-out, so refusals are returned (and committed), not thrown from inside.
@@ -272,19 +298,124 @@ export class Accounts {
       if (user.locked_until && new Date(user.locked_until) > this.now()) {
         return new Fail(new DomainError("rate_limited", "Too many failed attempts. Try again in a few minutes."));
       }
-      const step = verifyTotp(user.totp_secret, code, this.now(), user.totp_last_step === null ? null : Number(user.totp_last_step));
-      if (step === null) {
+      const wanted = code.trim().toLowerCase();
+      let recovered = false;
+      if (user.totp_enabled && RECOVERY_SHAPE.test(wanted)) {
+        const n = await this.db.run("UPDATE mfa_recovery_codes SET used_at = ? WHERE user_id = ? AND code_hash = ? AND used_at IS NULL", [this.ts(), user.id, sha256(wanted.replace("-", ""))]);
+        recovered = n === 1;
+      }
+      const step = recovered ? null : verifyTotp(user.totp_secret, code, this.now(), user.totp_last_step === null ? null : Number(user.totp_last_step));
+      if (!recovered && step === null) {
         const failed = user.failed_logins + 1;
         const lock = failed >= MAX_FAILED ? new Date(this.now().getTime() + LOCK_MINUTES * 60_000).toISOString() : null;
         await this.db.run("UPDATE users SET failed_logins = ?, locked_until = ? WHERE id = ?", [lock ? 0 : failed, lock, user.id]);
         await this.audit(user.clinic_id, user.email, "mfa.failed");
         if (lock) await this.db.run("DELETE FROM sessions WHERE user_id = ?", [user.id]);
-        return new Fail(new DomainError("unauthenticated", "That code is not right. Use the current code from your authenticator app."));
+        return new Fail(new DomainError("unauthenticated", "That code is not right. Use the current code from your authenticator app, or a recovery code."));
+      }
+      if (recovered) {
+        await this.db.run("UPDATE users SET failed_logins = 0 WHERE id = ?", [user.id]);
+        await this.db.run("UPDATE sessions SET mfa_ok = 1 WHERE token_hash = ?", [sha256(token)]);
+        await this.audit(user.clinic_id, user.email, "mfa.recovery_used");
+        return true;
       }
       await this.db.run("UPDATE users SET totp_enabled = 1, totp_last_step = ?, failed_logins = 0 WHERE id = ?", [step, user.id]);
       await this.db.run("UPDATE sessions SET mfa_ok = 1 WHERE token_hash = ?", [sha256(token)]);
       await this.audit(user.clinic_id, user.email, user.totp_enabled ? "mfa.ok" : "mfa.enabled");
       return true;
+    });
+    return { enrolled: !info.mfaEnabled };
+  }
+
+  /** Owner only: a member of staff has lost their authenticator and has no recovery codes. They enrol again at next sign-in. */
+  async resetMfa(actor: SessionUser, userId: string): Promise<void> {
+    if (actor.role !== "owner") throw new DomainError("forbidden", "Only the clinic owner can reset two-step sign-in");
+    if (userId === actor.id) throw new DomainError("invalid_state", "Ask another owner to reset your own two-step sign-in");
+    return this.db.scope(actor.clinicId, async () => {
+      const n = await this.db.run("UPDATE users SET totp_secret = NULL, totp_enabled = 0, totp_last_step = NULL, failed_logins = 0, locked_until = NULL WHERE id = ? AND clinic_id = ?", [userId, actor.clinicId]);
+      if (!n) throw new DomainError("not_found", "Staff member not found");
+      await this.db.run("DELETE FROM mfa_recovery_codes WHERE user_id = ?", [userId]);
+      await this.db.run("DELETE FROM sessions WHERE user_id = ?", [userId]);
+      await this.audit(actor.clinicId, actor.email, "user.mfa_reset", { userId });
+    });
+  }
+
+  // ---------------------------------------------------------------- recovery codes
+
+  /** Replaces any codes the signed-in person has with ten new single-use ones. They are shown once and stored only as hashes. */
+  async newRecoveryCodes(token: string): Promise<string[]> {
+    const info = await this.getSession(token);
+    if (!info || !info.mfaOk) throw new DomainError("unauthenticated", "Sign in again");
+    const codes = Array.from({ length: RECOVERY_CODE_COUNT }, newRecoveryCode);
+    await this.db.scope(info.user.clinicId, async () => {
+      await this.db.run("DELETE FROM mfa_recovery_codes WHERE user_id = ?", [info.user.id]);
+      for (const c of codes) {
+        await this.db.run("INSERT INTO mfa_recovery_codes (id, clinic_id, user_id, code_hash, created_at) VALUES (?, ?, ?, ?, ?)", [
+          crypto.randomUUID(), info.user.clinicId, info.user.id, sha256(c.replace("-", "")), this.ts(),
+        ]);
+      }
+      await this.audit(info.user.clinicId, info.user.email, "mfa.recovery_codes_created");
+    });
+    return codes;
+  }
+
+  async recoveryCodesLeft(token: string): Promise<number> {
+    const info = await this.getSession(token);
+    if (!info) return 0;
+    return this.db.scope(info.user.clinicId, async () => Number((await this.db.get<{ n: number }>("SELECT count(*) AS n FROM mfa_recovery_codes WHERE user_id = ? AND used_at IS NULL", [info.user.id]))?.n ?? 0));
+  }
+
+  // ---------------------------------------------------------------- forgotten password
+
+  /**
+   * Starts a reset for an email address. Says nothing about whether the address has an account: it returns the same
+   * way either way, and only a real, active account gets a link (by email, valid for an hour, usable once).
+   */
+  async requestPasswordReset(email: string): Promise<void> {
+    const found = await this.db.system(() => this.db.get<UserRow>("SELECT * FROM auth_user_by_email(?)", [email.trim().toLowerCase()]));
+    if (!found || !found.active) return;
+    await this.db.scope(found.clinic_id, async () => {
+      await this.db.run("DELETE FROM password_resets WHERE user_id = ? AND used_at IS NULL", [found.id]);
+      const token = randomToken(32);
+      const expires = new Date(this.now().getTime() + RESET_MINUTES * 60_000).toISOString();
+      await this.db.run("INSERT INTO password_resets (id, clinic_id, user_id, token_hash, created_at, expires_at) VALUES (?, ?, ?, ?, ?, ?)", [
+        crypto.randomUUID(), found.clinic_id, found.id, sha256(token), this.ts(), expires,
+      ]);
+      await this.audit(found.clinic_id, found.email, "password_reset.requested");
+      await this.resetHook?.({ clinicId: found.clinic_id, to: found.email, name: found.name, token });
+    });
+  }
+
+  /** True while a reset link can still be used (so the page can say so before asking for a new password). */
+  async resetLinkValid(token: string): Promise<boolean> {
+    if (!token || token.length > 128) return false;
+    const hash = sha256(token);
+    const clinicId = await clinicOf(this.db, "password_reset", hash);
+    if (!clinicId) return false;
+    return this.db.scope(clinicId, async () => {
+      const r = await this.db.get<{ used_at: string | null; expires_at: string }>("SELECT used_at, expires_at FROM password_resets WHERE token_hash = ?", [hash]);
+      return !!r && !r.used_at && new Date(r.expires_at) > this.now();
+    });
+  }
+
+  /** Sets a new password from a reset link. Signs the person out everywhere and clears any lock. Their second factor still applies. */
+  async completePasswordReset(token: string, password: string): Promise<void> {
+    if (!token || token.length > 128) throw new DomainError("invalid_state", BAD_RESET);
+    const hash = sha256(token);
+    const clinicId = await clinicOf(this.db, "password_reset", hash);
+    if (!clinicId) throw new DomainError("invalid_state", BAD_RESET);
+    await this.db.scope(clinicId, async () => {
+      const r = await this.db.get<{ id: string; user_id: string; used_at: string | null; expires_at: string }>("SELECT id, user_id, used_at, expires_at FROM password_resets WHERE token_hash = ? FOR UPDATE", [hash]);
+      if (!r || r.used_at || new Date(r.expires_at) <= this.now()) throw new DomainError("invalid_state", BAD_RESET);
+      const user = (await this.db.get<{ email: string; active: number }>("SELECT email, active FROM users WHERE id = ?", [r.user_id]))!;
+      if (!user.active) throw new DomainError("invalid_state", BAD_RESET);
+      // A weak password is refused before the link is used up, so the person can try again.
+      const problem = passwordProblem(password, user.email);
+      if (problem) throw new DomainError("validation", problem, [{ path: "password", message: problem }]);
+      await this.db.run("UPDATE users SET password_hash = ?, failed_logins = 0, locked_until = NULL WHERE id = ?", [hashPassword(password), r.user_id]);
+      await this.db.run("UPDATE password_resets SET used_at = ? WHERE id = ?", [this.ts(), r.id]);
+      await this.db.run("DELETE FROM sessions WHERE user_id = ?", [r.user_id]);
+      await this.audit(clinicId, user.email, "password_reset.completed");
     });
   }
 }
