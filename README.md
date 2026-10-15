@@ -20,9 +20,11 @@ This repository holds the consultation workflow (Phase 0), the diary and front d
 | E1.10 Calendar feed | Read-only iCalendar link per clinician, secret URL (hash stored), initials and type only |
 | Account recovery | Forgotten password: emailed single-use link, valid for an hour, same answer whether or not the address has an account; it signs the person out everywhere and does not bypass two-step sign-in. Lost phone: ten single-use recovery codes (shown once, stored hashed), or the owner can reset a colleague's two-step sign-in |
 | Reports | Appointments, seen, did-not-attend and cancellation rates, bookings by source and type, new patients, and per-clinician utilisation for any date range up to a year, in the clinic's time zone. Counts only; no patient is named |
-| Billing | A price on each appointment type; an invoice from an attended appointment in one click, or written by hand; payment recorded by method (cash, card, bank transfer, cheque, insurer) as it comes in, in part or in full; an Outstanding list; patient balance; printable invoice and credit note; revenue, collected-by-method, owed and overdue in Reports. Numbers run without gaps (`INV-000001`, credit notes `CN-000001`). Invoices, lines and payments are append-only in the database: a mistake is cancelled with a credit note (only once nothing is paid on it) and a wrong payment is reversed, and both stay on the record. VAT at one rate set in Settings. Owner and reception only |
+| Billing | A price on each appointment type; an invoice from an attended appointment in one click, or written by hand; payment recorded by method (cash, card, bank transfer, cheque, insurer) as it comes in, in part or in full; an Outstanding list; patient balance; printable invoice and credit note; revenue, collected-by-method, owed and overdue in Reports. Numbers run without gaps (`INV-000001`, credit notes `CN-000001`). When VAT is charged the clinic's VAT registration number is required (checked with HMRC's modulus-97 test), is kept on each invoice as issued and printed on it. Invoices, lines and payments are append-only in the database: a mistake is cancelled with a credit note (only once nothing is paid on it) and a wrong payment is reversed, and both stay on the record. VAT at one rate set in Settings. Owner and reception only |
 | Ayurveda | A clinic chooses physiotherapy, Ayurveda or both (Settings, or at setup). Each appointment type and consultation belongs to one discipline; the diary, patients, billing, patient link and check-in are shared. An Ayurvedic consultation has the same consent, approval and frozen-snapshot steps, but the practitioner writes it (no AI drafting, no transcript): history, medicines and allergies, constitution (prakriti), current imbalance (vikriti), agni and ama, examination, a safety screen, and a treatment plan of therapies, herbs, diet and daily routine. Approval needs the practitioner's qualification, the safety screen, medicines, allergies and (for herbs) instructions, duration and cautions. The patient sees the plan grouped by kind on the same no-login link |
-| Operations | `GET /api/health` reports whether the app can reach its database. Errors are logged by code and call stack only, because database messages can quote patient data |
+| Patient data rights | Owner-only download of everything held about a patient (record, appointments, forms, consultations, invoices, messages, who has viewed the record) as JSON, audited. "Remove their identity" keeps the clinical and financial record but removes name, contact details, date of birth, GP, address, consent marks, portal sign-ins, patient links and transcripts; refused while an appointment is coming up, and before the retention date unless the owner gives a written reason. A retention period per clinic (default 8 years after last activity, or the child's 25th birthday if later) with a list of people past it. Transcripts of approved consultations are cleared after 30 days (`TRANSCRIPT_RETENTION_DAYS`) |
+| Operations | `GET /api/health` reports whether the app can reach its database. Logs are one JSON object per line; errors carry a code and call stack only, because database messages can quote patient data. `scripts/backup.sh` (consistent, optionally encrypted, checksummed) and `scripts/restore-verify.sh` (restores into a throwaway database and checks migrations, row-level security and data). Runbook in [docs/OPERATIONS.md](docs/OPERATIONS.md). `npm audit` runs in CI |
+| Browser security | A Content-Security-Policy with a fresh script nonce on every page (injected scripts and inline handlers are blocked), HSTS and `upgrade-insecure-requests` when served over https, Permissions-Policy switching off camera, microphone, location and payment, frame denial |
 | E1.11 Switching import | Patients and appointments from **CSV or Excel (.xlsx)** from TM3, Cliniko, WriteUpp or anything else. Per-system export guidance, downloadable templates, and a **column check** where you choose which column goes into which field. Dry run that executes the real import and rolls it back, then confirm, then undo for 7 days. Consent is never imported |
 
 ## Run it
@@ -34,7 +36,7 @@ npm install
 cp .env.example .env.local     # set LINK_SECRET (and APP_BASE_URL outside localhost)
 npm run db:up                  # starts Postgres in Docker and applies db/migrations
 npm run dev                    # http://localhost:3000, goes to /setup on first run
-npm test                       # 177 tests, against a real Postgres (see below)
+npm test                       # 198 tests, against a real Postgres (see below)
 npm run typecheck
 npm run build && npm start
 ```
@@ -63,31 +65,30 @@ Tests need a Postgres superuser connection (`TEST_DATABASE_URL`, default `postgr
 | Consent gate, approval gate, immutable approved snapshot with hash, audit log (Phase 0) | Built and tested |
 | Diary, double-booking protection, time zones (including both clock changes) | Built and tested. Times are stored in UTC and shown in the clinic's zone (Europe/London) |
 | **Email and text sending** | **Not connected.** A development mailer accepts messages and the Outbox page lists them; nothing leaves the machine, and a banner says so on every staff page. A real provider needs a contract, a sender domain and a UK data-processing agreement, then an implementation of the `Mailer` interface in `src/lib/outbox.ts` |
-| **Tenancy** | Postgres row-level security: every query runs in a transaction that names one clinic, the app connects as a role that cannot bypass the policies, and a query that forgets its `WHERE clinic_id` still sees only its own clinic (tested at the database and through the service). Patient links and tokens find their clinic through narrow lookup functions. **Not yet done: a UK-region managed database, backups and restore drills. A gate item before real data** |
+| **Tenancy** | Postgres row-level security: every query runs in a transaction that names one clinic, the app connects as a role that cannot bypass the policies, and a query that forgets its `WHERE clinic_id` still sees only its own clinic (tested at the database and through the service). Patient links and tokens find their clinic through narrow lookup functions. Backup and restore-verify scripts are written and tested against a local Postgres. **Not yet done: a UK-region managed database, scheduled and off-site backups, and a restore drill on the real host. A gate item before real data** |
 | **Import** | CSV and Excel through a column check you can correct by hand. None of the three vendors publish their column headings, so **nothing has been checked against a real Cliniko, TM3 or WriteUpp export**. **TM3's own data extraction (a `tmBase` folder) cannot be read**; a sample would be needed to build and test a reader. Treatment notes, documents, invoices and consent are not imported |
 | Drafting | **Mock provider by default** (a keyword matcher, labelled as not clinical). `AI_PROVIDER=anthropic` is available but **has not been exercised against the live API** |
 | Cliniko write-back | **Payload unverified against the live API.** Idempotent; an uncertain outcome stops at "needs check" and asks a person |
 | Rate limiting | Shared through Postgres, so it holds across several app instances. Keys are stored hashed |
 | Audio capture and transcription | Not built. Paste or type the transcript |
 | Exercise catalogue, intake form, default hours | Starter content. A clinical lead should review before use |
-| **Billing** | Records what was charged and paid; it does not take money. **No card payments** (a Stripe account is needed) and **no insurer claim submission** (insurer name and claim reference are recorded on the invoice, nothing is sent). One VAT rate for the whole invoice; no per-item exemptions. Whether the invoice wording meets your accountant's and any insurer's requirements has not been checked |
+| **Billing** | Records what was charged and paid; it does not take money. **No card payments** (a Stripe account is needed) and **no insurer claim submission** (insurer name and claim reference are recorded on the invoice, nothing is sent). One VAT rate for the whole invoice; no per-item exemptions. Fettle does not send refunds: you pay the person back yourself, then reverse the payment with the reason. The VAT number is checked for format only, not against HMRC. Whether the invoice wording meets your accountant's and any insurer's requirements has not been checked |
 | **Ayurveda content** | **Starter library not reviewed by a qualified Ayurvedic practitioner** (the app says so where it is used). It holds therapies, diet and daily routine only: **no herbs and no doses**, which the practitioner writes and owns. Intensive cleansing procedures are left out. Ayurveda is not a regulated profession in the UK; the clinic is responsible for who practises, for the legal status of any herbal product supplied, and for herb-drug interaction checks. No Ayurveda-specific intake form yet; the physio intake form is reused. Write-back to Cliniko sends the note as text |
 | Notes templates, mobile apps | Later phases (see [docs/PRD.md](docs/PRD.md)) |
 
 ## Checked
 
-- 177 automated tests, each in its own fresh Postgres database under the same row-level security as production: domain rules, accounts and second factor, clock-change days, overlap protection (service and database), truly concurrent booking, clinic separation (database policies and service calls), online booking, manage links, forms, portal codes, waiting list (first accept wins, expiry, matching), outbox idempotency and retries, reminders, calendar feed, import with dry run, column mapping, Excel and undo.
+- 198 automated tests, each in its own fresh Postgres database under the same row-level security as production: domain rules, accounts and second factor, clock-change days, overlap protection (service and database), truly concurrent booking, clinic separation (database policies and service calls), online booking, manage links, forms, portal codes, waiting list (first accept wins, expiry, matching), outbox idempotency and retries, reminders, calendar feed, import with dry run, column mapping, Excel and undo.
+- Browser walkthrough of the data-rights screens (download, anonymise with and without override, retention page), the VAT number rules and invoice, and every page checked for Content-Security-Policy violations, plus a check that an injected script and inline handler are blocked. Backup and restore-verify run with and without encryption, and fail clearly on a wrong passphrase, a corrupted file and a missing migration.
 - Browser walkthroughs of billing (invoice, part payment, overpayment refused, reversal, credit note) and Ayurveda (consent, refused when incomplete, approval, patient plan on a phone, check-in).
 - Browser walkthrough of every Phase 1 screen: first-run set-up and two-step sign-in, booking and portal as a patient on a phone, drag-and-drop on the calendar, role restrictions (reception cannot reach settings, consultations, import or the outbox), lock-out.
 - Automated accessibility scan (axe, WCAG 2.1 AA and best practice) on every page in light and dark, at 390 px and desktop widths, with no violations. This does not replace a manual screen-reader and keyboard review.
 
 ## Before real patients
 
-Code work in progress on branch `gap-fixes` (not yet merged): patient export and anonymisation with retention rules, a Content-Security-Policy and HSTS, structured logs with a tested backup and restore script, and a VAT registration number on invoices. Until it is merged, none of those exist.
-
 - UK/EU hosting and a data-processing agreement with every sub-processor (email and text provider, AI vendor, host).
-- A UK-region managed Postgres (the schema and policies are done), backups with a tested restore.
-- A retention and deletion policy and a way to answer patient access and erasure requests (in progress, see above).
+- A UK-region managed Postgres (the schema and policies are done), scheduled off-site backups, and a restore drill on that host (the scripts are done).
+- A written retention and deletion policy for the clinic (the export, anonymise and retention tools are built; the policy and the decision on how long to keep records are the clinic's), and a way to tell patients that backups still hold their data until they age out.
 - Clinical review of the physiotherapy exercise catalogue and, separately, of the Ayurvedic starter library by a qualified Ayurvedic practitioner.
 - Billing checked by an accountant, including VAT invoice requirements.
 - DPIA, DTAC and clinical safety (DCB0129) work, and an MHRA intended-purpose analysis.
@@ -95,6 +96,7 @@ Code work in progress on branch `gap-fixes` (not yet merged): patient export and
 - A real email and text provider, then end-to-end tests of delivery.
 - Import checked against real exports from each system you are switching from.
 - Manual accessibility review and penetration test.
+- Error reporting and uptime alerting wired to the JSON logs and `/api/health`.
 
 ## Layout
 
@@ -104,6 +106,7 @@ Code work in progress on branch `gap-fixes` (not yet merged): patient export and
 - `src/lib/scheduling.ts`: patients, types, hours, availability, appointments, calendar markers.
 - `src/lib/forms.ts`, `booking.ts`, `waitlist.ts`, `outbox.ts`, `notify.ts`, `ical.ts`, `importer.ts`, `seed.ts`: the rest of Phase 1. `platform.ts` wires them together.
 - `src/lib/service.ts`, `ai/`, `writeback/`: the consultation workflow (consent, drafting for physiotherapy, approval, patient link, check-in, write-back). `ayurveda/`: the Ayurvedic record and plan shapes, starter library, approval rules and note formatting.
-- `src/lib/billing.ts`, `money.ts`: invoices, payments, credit notes and figures. `reports.ts`: practice figures.
+- `src/lib/billing.ts`, `money.ts`, `vat.ts`: invoices, payments, credit notes, figures and VAT number checks. `reports.ts`: practice figures. `records.ts`: patient export, anonymisation, retention.
+- `src/proxy.ts`, `src/lib/csp.ts`: the Content-Security-Policy and security headers. `src/lib/log.ts`: JSON logging. `scripts/backup.sh`, `scripts/restore-verify.sh` and `docs/OPERATIONS.md`: backups and the runbook.
 - `src/app/`: pages and server actions (`actions/` for the diary, billing and settings).
-- `tests/`: unit and domain tests, including `billing.test.ts`, `ayurveda.test.ts`, `hardening.test.ts` and `rls.test.ts` (database isolation).
+- `tests/`: unit and domain tests, including `billing.test.ts`, `ayurveda.test.ts`, `records.test.ts`, `csp.test.ts`, `hardening.test.ts` and `rls.test.ts` (database isolation).

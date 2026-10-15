@@ -4,7 +4,7 @@ Version 3 · October 2026 · Owner: Jijesh P.
 
 This document says what Fettle is for, who it is for, what it must do, and what is built, in progress and not yet started. It replaces the earlier PRD v2. The README describes how to run the code; this describes what the product is meant to be. Where the two overlap, the README's "What is real and what is not" is the more cautious statement of fact.
 
-Status key: **Built** (in `main`, tested) · **In progress** (on branch `gap-fixes`, not merged) · **Not built** · **Needs others** (cannot be closed by code alone).
+Status key: **Built** (in `main` or on the open `gap-fixes` branch, tested) · **In progress** · **Not built** · **Needs others** (cannot be closed by code alone).
 
 ---
 
@@ -122,9 +122,9 @@ Ayurveda is not a regulated profession in the UK. The product records who practi
 |---|---|---|
 | P1 | Create, search, edit; duplicate warning; merge (irreversible) | Built |
 | P2 | Every view of a patient record is written to the audit log | Built |
-| P3 | **Patient export:** a full copy of what the clinic holds (patient, appointments, forms, consultations, invoices, messages, access log), owner only, audited | In progress |
-| P4 | **Anonymisation:** identity removed, clinical and financial history kept for the retention period, refused if the patient has upcoming appointments or retention has not ended without a written override reason | In progress |
-| P5 | **Retention:** a per-clinic retention period (default 8 years after last activity, or the child's 25th birthday if later), a list of patients due for review, and a purge of old transcripts | In progress |
+| P3 | **Patient export:** a full copy of what the clinic holds (patient, appointments, forms, consultations, invoices, messages, access log), owner only, audited | Built |
+| P4 | **Anonymisation:** identity removed, clinical and financial history kept for the retention period, refused if the patient has upcoming appointments or retention has not ended without a written override reason | Built |
+| P5 | **Retention:** a per-clinic retention period (default 8 years after last activity, or the child's 25th birthday if later), a list of patients due for review, and a purge of old transcripts | Built |
 
 ### 4.5 Billing
 
@@ -136,8 +136,8 @@ Ayurveda is not a regulated profession in the UK. The product records who practi
 | B4 | **Append-only.** Invoices, lines and payments cannot be updated or deleted by the app role. A mistake is cancelled with a credit note (only when nothing is paid); a wrong payment is reversed by a negative row, once | Built |
 | B5 | Outstanding list, patient balance, printable invoice and credit note | Built |
 | B6 | VAT at one rate for the whole invoice | Built |
-| B7 | **VAT registration number** required when VAT is charged, validated, and printed on invoices | In progress |
-| B8 | Refund wording: what "reverse" and "credit note" mean and when each applies | In progress |
+| B7 | **VAT registration number** required when VAT is charged, validated, and printed on invoices | Built |
+| B8 | Refund wording: Fettle records money and does not send it; how "reverse" and "credit note" are used | Built |
 | B9 | Card payments (Stripe) | Not built |
 | B10 | Insurer claim submission (currently only the insurer and claim reference are recorded) | Not built |
 | B11 | Accountant review of invoice wording and VAT handling | Needs others |
@@ -176,15 +176,15 @@ Access to billing is owner and reception only. Clinicians are denied.
 - **Append-only tables.** `audit_log`, `invoices`, `invoice_lines` and `payments` have no UPDATE or DELETE for the app role. **Built.**
 - **Secrets at rest.** Session tokens, rate-limit keys, calendar-feed secrets, recovery codes and password-reset tokens are stored hashed. **Built.**
 - **Errors.** Logged by code, constraint and stack only, because database messages can quote patient data. **Built.**
-- **Browser protections.** `X-Content-Type-Options`, `Referrer-Policy`, `X-Frame-Options`, no `X-Powered-By`. **Built.** A Content-Security-Policy with a per-request nonce, HSTS on HTTPS and a Permissions-Policy. **In progress.**
+- **Browser protections.** `X-Content-Type-Options`, `Referrer-Policy`, `X-Frame-Options`, no `X-Powered-By`. **Built.** A Content-Security-Policy with a per-request nonce, HSTS on HTTPS, a Permissions-Policy and Cross-Origin-Opener-Policy. **Built.**
 - **Penetration test.** **Needs others.**
 
 ### 5.2 Reliability and operations
 
 - `GET /api/health` reports database reachability. **Built.**
 - Background tick (reminders, waiting-list expiry, outbox delivery) every 30 seconds, or an external scheduler via `POST /api/worker` with a bearer secret. **Built.**
-- Structured JSON logs. **In progress.**
-- Backup and restore scripts with a restore-verify drill, an operations runbook, and `npm audit` in CI. **In progress.**
+- Structured JSON logs. **Built.**
+- Backup and restore-verify scripts (encrypted, checksummed; restore checks migrations, row-level security and data), an operations runbook ([OPERATIONS.md](OPERATIONS.md)), and `npm audit` in CI. **Built**, tested on a local Postgres only.
 - A UK-region managed Postgres with backups and a tested restore. **Not built; a gate item.**
 - Error reporting service and uptime alerting. **Not built.**
 
@@ -227,7 +227,7 @@ Access to billing is owner and reception only. Clinicians are denied.
 | Money | Whole pence everywhere |
 | Drafting | Provider interface: a labelled mock by default; Anthropic available |
 
-Migrations: 0001 schema, 0002 hardening, 0003 billing, 0004 Ayurveda, 0005 records (in progress).
+Migrations: 0001 schema, 0002 hardening, 0003 billing, 0004 Ayurveda, 0005 records and VAT number.
 
 Repository layout is in the README.
 
@@ -237,14 +237,11 @@ Repository layout is in the README.
 
 ### Done and merged to `main`
 
-Consultation workflow · diary and front desk · row-level security on Postgres 16 · hardening (rate limiting, password reset, recovery codes, reports, health) · billing · Ayurveda as a second discipline. 177 automated tests pass.
+Consultation workflow · diary and front desk · row-level security on Postgres 16 · hardening (rate limiting, password reset, recovery codes, reports, health) · billing · Ayurveda as a second discipline. 177 automated tests passed at that point.
 
-### In progress (`gap-fixes`)
+### Gap fixes (`gap-fixes`, awaiting merge)
 
-1. Patient export, anonymisation and retention (P3 to P5).
-2. Content-Security-Policy, HSTS, Permissions-Policy.
-3. Structured logs, backup and restore scripts, runbook, `npm audit` in CI.
-4. VAT registration number on invoices; refund wording.
+Patient export, anonymisation and retention (P3 to P5) · Content-Security-Policy, HSTS, Permissions-Policy · structured logs, backup and restore-verify scripts, runbook, `npm audit` in CI · VAT registration number on invoices and refund wording. 198 tests pass.
 
 ### Next, in order
 
