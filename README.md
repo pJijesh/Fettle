@@ -2,7 +2,7 @@
 
 Fettle is a UK practice-management system for physiotherapy and Ayurveda clinics, built to replace TM3, Cliniko and WriteUpp, with the consultation-to-plan workflow at its core. For physiotherapy, one consultation transcript becomes a structured SOAP note and a home exercise programme. For Ayurveda, the practitioner writes a structured record and a treatment plan by hand (no AI drafting). Either way a practitioner reviews it at a single approval gate, and the patient gets a no-login link with a two-tap check-in.
 
-This repository holds the consultation workflow (Phase 0), the diary and front desk (Phase 1), billing, and Ayurveda as a second discipline. It is a pilot-grade prototype, not a certified clinical product, and it is **not ready for real patient data** (see "Before real patients"). The full plan, with what is still to come, is in the PRD (v2).
+This repository holds the consultation workflow (Phase 0), the diary and front desk (Phase 1), billing, and Ayurveda as a second discipline. It is a pilot-grade prototype, not a certified clinical product, and it is **not ready for real patient data** (see "Before real patients"). The full plan, with what is still to come, is in [docs/PRD.md](docs/PRD.md).
 
 ## What is built
 
@@ -72,7 +72,7 @@ Tests need a Postgres superuser connection (`TEST_DATABASE_URL`, default `postgr
 | Exercise catalogue, intake form, default hours | Starter content. A clinical lead should review before use |
 | **Billing** | Records what was charged and paid; it does not take money. **No card payments** (a Stripe account is needed) and **no insurer claim submission** (insurer name and claim reference are recorded on the invoice, nothing is sent). One VAT rate for the whole invoice; no per-item exemptions. Whether the invoice wording meets your accountant's and any insurer's requirements has not been checked |
 | **Ayurveda content** | **Starter library not reviewed by a qualified Ayurvedic practitioner** (the app says so where it is used). It holds therapies, diet and daily routine only: **no herbs and no doses**, which the practitioner writes and owns. Intensive cleansing procedures are left out. Ayurveda is not a regulated profession in the UK; the clinic is responsible for who practises, for the legal status of any herbal product supplied, and for herb-drug interaction checks. No Ayurveda-specific intake form yet; the physio intake form is reused. Write-back to Cliniko sends the note as text |
-| Notes templates, mobile apps | Later phases (see the PRD) |
+| Notes templates, mobile apps | Later phases (see [docs/PRD.md](docs/PRD.md)) |
 
 ## Checked
 
@@ -98,6 +98,7 @@ Code work in progress on branch `gap-fixes` (not yet merged): patient export and
 
 ## Layout
 
+- `docs/PRD.md`: the product requirements, with status of every requirement and the roadmap.
 - `db/migrations/`: the schema, row-level security policies, the overlap constraint and the `fettle_app` role. `src/lib/db.ts`: the clinic-scoped transaction layer. `src/lib/migrate.ts`: the migration runner.
 - `src/lib/accounts.ts`, `crypto.ts`, `auth.ts`: users, sessions, two-step sign-in.
 - `src/lib/scheduling.ts`: patients, types, hours, availability, appointments, calendar markers.
