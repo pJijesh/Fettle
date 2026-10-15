@@ -1,10 +1,10 @@
-# Fettle (Phase 1)
+# Fettle
 
-Fettle is a UK practice-management system for physiotherapy clinics, built to replace TM3, Cliniko and WriteUpp, with the consultation-to-programme workflow at its core: one consultation transcript becomes a structured SOAP note and a home exercise programme, a physio reviews both at a single approval gate, and the patient gets a no-login link with a two-tap check-in.
+Fettle is a UK practice-management system for physiotherapy and Ayurveda clinics, built to replace TM3, Cliniko and WriteUpp, with the consultation-to-plan workflow at its core. For physiotherapy, one consultation transcript becomes a structured SOAP note and a home exercise programme. For Ayurveda, the practitioner writes a structured record and a treatment plan by hand (no AI drafting). Either way a practitioner reviews it at a single approval gate, and the patient gets a no-login link with a two-tap check-in.
 
-This repository holds **Phase 0** (the consultation workflow) and **Phase 1** (the diary and front desk). It is a pilot-grade prototype, not a certified clinical product. The full plan, with what is still to come, is in the PRD (v2).
+This repository holds the consultation workflow (Phase 0), the diary and front desk (Phase 1), billing, and Ayurveda as a second discipline. It is a pilot-grade prototype, not a certified clinical product, and it is **not ready for real patient data** (see "Before real patients"). The full plan, with what is still to come, is in the PRD (v2).
 
-## What Phase 1 adds
+## What is built
 
 | PRD item | What it does |
 |---|---|
@@ -39,7 +39,7 @@ npm run typecheck
 npm run build && npm start
 ```
 
-First run: `/setup` creates the clinic and its owner, with default appointment types (Initial assessment, Follow-up, Review), Monday to Friday 09:00 to 17:00 hours, and a starter intake form. Then set up two-step sign-in with an authenticator app. Add staff under Settings. Online booking is at `/book/<clinic-slug>` and the portal at `/portal/<clinic-slug>`.
+First run: `/setup` creates the clinic and its owner, asks whether the clinic practises physiotherapy, Ayurveda or both, and adds default appointment types for each (physiotherapy: Initial assessment, Follow-up, Review; Ayurveda: Initial Ayurvedic consultation, Ayurvedic follow-up, Ayurvedic therapy session), Monday to Friday 09:00 to 17:00 hours, and a starter intake form. Then set up two-step sign-in with an authenticator app. Add staff under Settings. Online booking is at `/book/<clinic-slug>` and the portal at `/portal/<clinic-slug>`.
 
 A background tick runs every 30 seconds inside the app (reminders, waiting-list expiry, message delivery). To run it from an external scheduler instead, set `DISABLE_BACKGROUND_TICK=1` and `CRON_SECRET`, and call `POST /api/worker` with `Authorization: Bearer <CRON_SECRET>`.
 
@@ -77,13 +77,19 @@ Tests need a Postgres superuser connection (`TEST_DATABASE_URL`, default `postgr
 ## Checked
 
 - 177 automated tests, each in its own fresh Postgres database under the same row-level security as production: domain rules, accounts and second factor, clock-change days, overlap protection (service and database), truly concurrent booking, clinic separation (database policies and service calls), online booking, manage links, forms, portal codes, waiting list (first accept wins, expiry, matching), outbox idempotency and retries, reminders, calendar feed, import with dry run, column mapping, Excel and undo.
-- Browser walkthrough of every screen: first-run set-up and two-step sign-in, booking and portal as a patient on a phone, drag-and-drop on the calendar, role restrictions (reception cannot reach settings, consultations, import or the outbox), lock-out.
+- Browser walkthroughs of billing (invoice, part payment, overpayment refused, reversal, credit note) and Ayurveda (consent, refused when incomplete, approval, patient plan on a phone, check-in).
+- Browser walkthrough of every Phase 1 screen: first-run set-up and two-step sign-in, booking and portal as a patient on a phone, drag-and-drop on the calendar, role restrictions (reception cannot reach settings, consultations, import or the outbox), lock-out.
 - Automated accessibility scan (axe, WCAG 2.1 AA and best practice) on every page in light and dark, at 390 px and desktop widths, with no violations. This does not replace a manual screen-reader and keyboard review.
 
 ## Before real patients
 
+Code work in progress on branch `gap-fixes` (not yet merged): patient export and anonymisation with retention rules, a Content-Security-Policy and HSTS, structured logs with a tested backup and restore script, and a VAT registration number on invoices. Until it is merged, none of those exist.
+
 - UK/EU hosting and a data-processing agreement with every sub-processor (email and text provider, AI vendor, host).
-- A UK-region managed Postgres (the schema and policies are done), backups with a tested restore, retention and deletion policy.
+- A UK-region managed Postgres (the schema and policies are done), backups with a tested restore.
+- A retention and deletion policy and a way to answer patient access and erasure requests (in progress, see above).
+- Clinical review of the physiotherapy exercise catalogue and, separately, of the Ayurvedic starter library by a qualified Ayurvedic practitioner.
+- Billing checked by an accountant, including VAT invoice requirements.
 - DPIA, DTAC and clinical safety (DCB0129) work, and an MHRA intended-purpose analysis.
 - Clinical review of the prompt, catalogue, starter intake form and safety wording.
 - A real email and text provider, then end-to-end tests of delivery.
@@ -96,6 +102,7 @@ Tests need a Postgres superuser connection (`TEST_DATABASE_URL`, default `postgr
 - `src/lib/accounts.ts`, `crypto.ts`, `auth.ts`: users, sessions, two-step sign-in.
 - `src/lib/scheduling.ts`: patients, types, hours, availability, appointments, calendar markers.
 - `src/lib/forms.ts`, `booking.ts`, `waitlist.ts`, `outbox.ts`, `notify.ts`, `ical.ts`, `importer.ts`, `seed.ts`: the rest of Phase 1. `platform.ts` wires them together.
-- `src/lib/service.ts`, `ai/`, `writeback/`: Phase 0 consultation workflow.
-- `src/app/`: pages and server actions (`actions/` for Phase 1).
-- `tests/`: unit and domain tests.
+- `src/lib/service.ts`, `ai/`, `writeback/`: the consultation workflow (consent, drafting for physiotherapy, approval, patient link, check-in, write-back). `ayurveda/`: the Ayurvedic record and plan shapes, starter library, approval rules and note formatting.
+- `src/lib/billing.ts`, `money.ts`: invoices, payments, credit notes and figures. `reports.ts`: practice figures.
+- `src/app/`: pages and server actions (`actions/` for the diary, billing and settings).
+- `tests/`: unit and domain tests, including `billing.test.ts`, `ayurveda.test.ts`, `hardening.test.ts` and `rls.test.ts` (database isolation).
