@@ -177,7 +177,7 @@ export class Db {
   }
 }
 
-export type ClinicKey = "appointment" | "form_request" | "offer" | "patient_link" | "portal_session" | "ical_token";
+export type ClinicKey = "appointment" | "form_request" | "offer" | "patient_link" | "portal_session" | "ical_token" | "password_reset";
 
 const CLINIC_LOOKUP: Record<ClinicKey, string> = {
   appointment: "clinic_of_appointment",
@@ -186,6 +186,7 @@ const CLINIC_LOOKUP: Record<ClinicKey, string> = {
   patient_link: "clinic_of_patient_link",
   portal_session: "clinic_of_portal_session",
   ical_token: "clinic_of_ical_token",
+  password_reset: "clinic_of_password_reset",
 };
 
 /**

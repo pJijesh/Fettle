@@ -1,3 +1,4 @@
+import crypto from "node:crypto";
 import type { Db } from "./db";
 import { formatLocal } from "./tz";
 import { makeLink } from "./links";
@@ -151,6 +152,18 @@ export class Notifier {
       })) || sent;
     }
     return sent;
+  }
+
+  /** Staff password reset link. Goes to the staff member's own address; valid for an hour and once only. */
+  async passwordReset(clinicId: string, to: string, name: string, token: string): Promise<boolean> {
+    return this.db.scope(clinicId, async () => {
+      const clinic = await this.db.get<{ name: string }>("SELECT name FROM clinics WHERE id = ?", [clinicId]);
+      return this.outbox.queue({
+        clinicId, channel: "email", to, subject: "Reset your Fettle password",
+        body: `Hello ${name},\n\nSomeone asked to reset the password for your ${clinic?.name ?? "clinic"} account. To choose a new one, open this link within the hour:\n\n${this.baseUrl()}/reset/${token}\n\nIt can be used once. If you did not ask for this, you can ignore this message and your password will stay as it is.`,
+        kind: "password_reset", key: `pwreset:${crypto.randomUUID()}`,
+      });
+    });
   }
 
   async portalCode(clinicId: string, patientId: string, code: string): Promise<void> {

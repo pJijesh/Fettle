@@ -4,10 +4,11 @@ export async function register() {
   const g = globalThis as unknown as { __ctpTimer?: ReturnType<typeof setInterval> };
   if (g.__ctpTimer || process.env.DISABLE_BACKGROUND_TICK === "1") return;
   const { getPlatform } = await import("./lib/app");
+  const { logError } = await import("./lib/log");
   g.__ctpTimer = setInterval(() => {
     getPlatform()
       .tick()
-      .catch((err) => console.error("background tick failed", err));
+      .catch((err) => logError("tick", err));
   }, 30_000);
   g.__ctpTimer.unref?.();
 }

@@ -16,7 +16,8 @@ export default async function MfaPage() {
       <div className="card">
         <ActionForm action={mfaAction} submitLabel="Sign in">
           <label htmlFor="code">6-digit code from your authenticator app</label>
-          <input id="code" name="code" inputMode="numeric" autoComplete="one-time-code" pattern="[0-9 ]{6,7}" maxLength={7} required autoFocus />
+          <input id="code" name="code" autoComplete="one-time-code" maxLength={12} required autoFocus aria-describedby="rec" />
+          <p id="rec" className="muted">Lost your phone? Enter one of your recovery codes here instead (like <span className="mono">abcde-fghjk</span>). If you have none, ask your clinic owner to reset your two-step sign-in.</p>
         </ActionForm>
       </div>
     </main>

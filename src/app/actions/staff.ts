@@ -311,6 +311,16 @@ export async function resetPasswordAction(_prev: ActionState, form: FormData): P
   return { ok: true, message: "Password changed and the person was signed out." };
 }
 
+export async function resetMfaAction(_prev: ActionState, form: FormData): Promise<ActionState> {
+  const user = await requireUser(["owner"]);
+  try {
+    await getPlatform().accounts.resetMfa(user, field(form, "id"));
+  } catch (err) {
+    return fail(err);
+  }
+  return { ok: true, message: "Two-step sign-in reset. They will set it up again at their next sign-in." };
+}
+
 export async function icalCreateAction(_prev: ActionState, form: FormData): Promise<ActionState> {
   const user = await requireUser(["owner", "clinician"]);
   const target = user.role === "owner" && field(form, "userId") ? field(form, "userId") : user.id;

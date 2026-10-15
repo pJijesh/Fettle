@@ -3,7 +3,7 @@ import { requireUser } from "@/lib/auth";
 import type { SessionUser } from "@/lib/accounts";
 import { getPlatform, withClinic } from "@/lib/app";
 import { minutesToClock } from "@/lib/tz";
-import { createUserAction, deactivateUserAction, icalRevokeAction, resetPasswordAction, saveHoursAction, saveTypeAction } from "../actions/staff";
+import { createUserAction, deactivateUserAction, icalRevokeAction, resetMfaAction, resetPasswordAction, saveHoursAction, saveTypeAction } from "../actions/staff";
 import { ActionForm } from "../Forms";
 import { Header } from "../Header";
 import { IcalMaker } from "./IcalMaker";
@@ -142,7 +142,7 @@ async function SettingsBody(user: SessionUser) {
                   <div><label htmlFor="sr">Role</label><select id="sr" name="role"><option value="clinician">Clinician (diary, patients, notes)</option><option value="reception">Reception (diary and patients, no clinical notes)</option><option value="owner">Owner (everything)</option></select></div>
                 </div>
               </ActionForm>
-              <h3>Reset a password or deactivate</h3>
+              <h3>Reset a password, reset two-step sign-in, or deactivate</h3>
               {staff.filter((s) => s.id !== user.id).map((s) => (
                 <details key={s.id} className="sub">
                   <summary>{s.name}</summary>
@@ -150,6 +150,7 @@ async function SettingsBody(user: SessionUser) {
                     <label htmlFor={`pw${s.id}`}>New password</label>
                     <input id={`pw${s.id}`} name="password" type="password" minLength={12} required autoComplete="new-password" />
                   </ActionForm>
+                  {s.mfa ? <div style={{ marginTop: 8 }}><ActionForm action={resetMfaAction} hidden={{ id: s.id }} submitLabel="Reset two-step sign-in" submitClass="" confirmText={`Reset two-step sign-in for ${s.name}? They will be signed out and must set it up again. Use this if they lost their phone and have no recovery codes.`} /></div> : null}
                   {s.active ? <div style={{ marginTop: 8 }}><ActionForm action={deactivateUserAction} hidden={{ id: s.id }} submitLabel={`Deactivate ${s.name}`} submitClass="danger" confirmText={`Deactivate ${s.name}? They will be signed out.`} /></div> : null}
                 </details>
               ))}

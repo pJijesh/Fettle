@@ -1,16 +1,13 @@
-/** A small in-memory limiter for sign-in and public forms. One process only; move to a shared store when scaled out. */
+import { getDb, type Db } from "./db";
 
-const buckets = new Map<string, { count: number; reset: number }>();
+/**
+ * Rate limiting for sign-in and public forms. Counts live in Postgres, so every app process shares them.
+ * Keys are hashed in the database; nothing identifying is stored in the clear.
+ */
+export async function allowOn(db: Db, key: string, max: number, windowMs: number): Promise<boolean> {
+  return db.system(async () => (await db.get<{ ok: boolean }>("SELECT rate_limit_hit(?, ?::int, ?::int) AS ok", [key, max, windowMs]))!.ok);
+}
 
-export function allow(key: string, max: number, windowMs: number, now = Date.now()): boolean {
-  const entry = buckets.get(key);
-  if (!entry || entry.reset <= now) {
-    buckets.set(key, { count: 1, reset: now + windowMs });
-    return true;
-  }
-  entry.count += 1;
-  if (buckets.size > 10_000) {
-    for (const [k, v] of buckets) if (v.reset <= now) buckets.delete(k);
-  }
-  return entry.count <= max;
+export function allow(key: string, max: number, windowMs: number): Promise<boolean> {
+  return allowOn(getDb(), key, max, windowMs);
 }

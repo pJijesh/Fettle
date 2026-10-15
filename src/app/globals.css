@@ -121,3 +121,10 @@ legend { font-weight: 600; font-size: .92rem; padding: 0 6px; }
   .who { width: 100%; justify-content: space-between; }
   .banner.flat { font-size: .85rem; padding: 6px 12px; }
 }
+
+/* Reports */
+.stats { display: grid; grid-template-columns: repeat(auto-fit, minmax(150px, 1fr)); gap: 12px; margin: 0; }
+.stats div { border: 1px solid var(--line); border-radius: 8px; padding: 10px 12px; background: var(--bg); }
+.stats dt { color: var(--muted); font-size: .85rem; }
+.stats dd { margin: 2px 0 0; font-size: 1.4rem; font-weight: 600; }
+.stats dd .muted { font-size: .8rem; font-weight: 400; }
