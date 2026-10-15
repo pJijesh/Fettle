@@ -41,6 +41,7 @@ async function SettingsBody(user: SessionUser) {
           <p className="row">
             <Link className="btn" href="/settings/forms">Intake forms</Link>
             <Link className="btn" href="/settings/import">Switch from another system</Link>
+            <Link className="btn" href="/settings/retention">Records and retention</Link>
             <Link className="btn" href="/dev/outbox">Outbox</Link>
           </p>
         ) : null}

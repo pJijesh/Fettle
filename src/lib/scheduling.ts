@@ -32,6 +32,7 @@ export interface Patient {
   emailConsentAt: string | null;
   marketingConsentAt: string | null;
   mergedInto: string | null;
+  anonymisedAt: string | null;
 }
 
 export interface PatientInput {
@@ -216,6 +217,7 @@ export class Scheduling {
       emailConsentAt: (r.email_consent_at as string) ?? null,
       marketingConsentAt: (r.marketing_consent_at as string) ?? null,
       mergedInto: (r.merged_into as string) ?? null,
+      anonymisedAt: (r.anonymised_at as string) ?? null,
     };
   }
 
@@ -260,7 +262,7 @@ export class Scheduling {
 
   async searchPatients(clinicId: string, q: string, limit = 25): Promise<Patient[]> {
     const terms = q.trim().split(/\s+/).filter(Boolean).slice(0, 4);
-    const where = ["clinic_id = ?", "merged_into IS NULL"];
+    const where = ["clinic_id = ?", "merged_into IS NULL", "anonymised_at IS NULL"];
     const params: (string | number)[] = [clinicId];
     for (const t of terms) {
       const like = `%${t.replace(/[\\%_]/g, (c) => "\\" + c)}%`;
@@ -276,7 +278,7 @@ export class Scheduling {
   async findDuplicates(clinicId: string, p: { firstName: string; lastName: string; dob?: string | null; email?: string | null }, exceptId?: string): Promise<Patient[]> {
     return this.db.scope(clinicId, async () => {
       const rows = await this.db.all(
-        `SELECT * FROM patients WHERE clinic_id = ? AND merged_into IS NULL AND id <> ? AND (
+        `SELECT * FROM patients WHERE clinic_id = ? AND merged_into IS NULL AND anonymised_at IS NULL AND id <> ? AND (
            (lower(last_name) = lower(?) AND lower(first_name) = lower(?) AND (dob IS NOT NULL AND dob = ?))
            OR (email IS NOT NULL AND email = ?))
          LIMIT 10`,

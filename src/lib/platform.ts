@@ -8,6 +8,7 @@ import { Importer } from "./importer";
 import { Notifier } from "./notify";
 import { DevMailer, Outbox, type Mailer } from "./outbox";
 import { Billing } from "./billing";
+import { Records } from "./records";
 import { Reports } from "./reports";
 import { Scheduling } from "./scheduling";
 import { Waitlist } from "./waitlist";
@@ -29,6 +30,7 @@ export function createPlatform(db: Db, opts: { now?: () => Date; baseUrl?: () =>
   const importer = new Importer(db, scheduling, now);
   const reports = new Reports(db, now);
   const billing = new Billing(db, scheduling, now);
+  const records = new Records(db, scheduling, now);
 
   accounts.setResetHook((m) => notifier.passwordReset(m.clinicId, m.to, m.name, m.token).then(() => undefined));
 
@@ -76,7 +78,8 @@ export function createPlatform(db: Db, opts: { now?: () => Date; baseUrl?: () =>
    * one clinic cannot stop the others). Safe to run as often as you like and from more than one place.
    */
   async function tick() {
-    const total = { reminders: 0, expired: 0, reoffered: 0, sent: 0, failed: 0, errors: 0 };
+    const total = { reminders: 0, expired: 0, reoffered: 0, sent: 0, failed: 0, purged: 0, errors: 0 };
+    const transcriptDays = Number(process.env.TRANSCRIPT_RETENTION_DAYS ?? 30);
     for (const clinicId of await scheduling.clinicIds()) {
       try {
         total.reminders += await queueReminders(clinicId);
@@ -86,6 +89,7 @@ export function createPlatform(db: Db, opts: { now?: () => Date; baseUrl?: () =>
         const delivered = await outbox.deliverDue(clinicId, mailer);
         total.sent += delivered.sent;
         total.failed += delivered.failed;
+        total.purged += await records.purgeTranscripts(clinicId, transcriptDays);
       } catch (err) {
         total.errors++;
         logError(`tick:${clinicId}`, err);
@@ -94,7 +98,7 @@ export function createPlatform(db: Db, opts: { now?: () => Date; baseUrl?: () =>
     return total;
   }
 
-  return { db, now, accounts, scheduling, forms, booking, waitlist, outbox, notifier, ical, importer, reports, billing, mailer, tick, baseUrl };
+  return { db, now, accounts, scheduling, forms, booking, waitlist, outbox, notifier, ical, importer, reports, billing, records, mailer, tick, baseUrl };
 }
 
 export type Platform = ReturnType<typeof createPlatform>;
