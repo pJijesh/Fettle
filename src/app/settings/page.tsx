@@ -5,7 +5,7 @@ import { getPlatform, withClinic } from "@/lib/app";
 import { formatPence, poundsField } from "@/lib/money";
 import { minutesToClock } from "@/lib/tz";
 import { saveBillingSettingsAction } from "../actions/billing";
-import { createUserAction, deactivateUserAction, icalRevokeAction, resetMfaAction, resetPasswordAction, saveHoursAction, saveTypeAction } from "../actions/staff";
+import { saveDisciplinesAction, createUserAction, deactivateUserAction, icalRevokeAction, resetMfaAction, resetPasswordAction, saveHoursAction, saveTypeAction } from "../actions/staff";
 import { ActionForm } from "../Forms";
 import { Header } from "../Header";
 import { IcalMaker } from "./IcalMaker";
@@ -60,11 +60,25 @@ async function SettingsBody(user: SessionUser) {
               <p><Link href={`/book/${clinic.slug}`}>Open the booking page</Link></p>
             </section>
 
+            <section className="card" aria-labelledby="disc">
+              <h2 id="disc">What the clinic practises</h2>
+              <p className="muted">Each appointment type and consultation belongs to one discipline. Physiotherapy consultations are drafted with AI help and produce an exercise programme. Ayurvedic consultations are written by the practitioner and produce a treatment plan; no AI drafts them. The diary, patients, billing and patient links are shared.</p>
+              <ActionForm action={saveDisciplinesAction} submitLabel="Save" submitClass="">
+                <label htmlFor="disciplines">Practised here</label>
+                <select id="disciplines" name="disciplines" defaultValue={clinic.disciplines} style={{ maxWidth: 320 }}>
+                  <option value="physio">Physiotherapy</option>
+                  <option value="ayurveda">Ayurveda</option>
+                  <option value="both">Physiotherapy and Ayurveda</option>
+                </select>
+                <p className="muted">Turning a discipline on adds a few starter appointment types, which you can rename and price below. The Ayurvedic starter library of therapies, diet and daily routine has not been reviewed by a qualified Ayurvedic practitioner; review it before you use it with patients.</p>
+              </ActionForm>
+            </section>
+
             <section className="card" aria-labelledby="types">
               <h2 id="types">Appointment types</h2>
               {types.map((t) => (
                 <details key={t.id} className="sub">
-                  <summary>{t.name} · {t.durationMin} min{t.pricePence ? ` · ${formatPence(t.pricePence)}` : ""}{t.bufferMin ? ` + ${t.bufferMin} buffer` : ""}{t.active ? "" : " · not offered"}{t.onlineBookable ? " · online" : ""}</summary>
+                  <summary>{t.name} · {t.durationMin} min{clinic.disciplines === "both" ? (t.discipline === "ayurveda" ? " · Ayurveda" : " · physio") : ""}{t.pricePence ? ` · ${formatPence(t.pricePence)}` : ""}{t.bufferMin ? ` + ${t.bufferMin} buffer` : ""}{t.active ? "" : " · not offered"}{t.onlineBookable ? " · online" : ""}</summary>
                   <ActionForm action={saveTypeAction} hidden={{ id: t.id }} submitLabel="Save type" submitClass="">
                     <div className="grid2">
                       <div><label htmlFor={`n${t.id}`}>Name</label><input id={`n${t.id}`} name="name" defaultValue={t.name} required /></div>
@@ -72,6 +86,12 @@ async function SettingsBody(user: SessionUser) {
                       <div><label htmlFor={`b${t.id}`}>Buffer after (minutes)</label><input id={`b${t.id}`} name="bufferMin" type="number" min={0} max={120} defaultValue={t.bufferMin} /></div>
                       <div><label htmlFor={`c${t.id}`}>Colour</label><select id={`c${t.id}`} name="colour" defaultValue={t.colour}>{COLOURS.map((c) => <option key={c}>{c}</option>)}</select></div>
                       <div><label htmlFor={`p${t.id}`}>Price (£)</label><input id={`p${t.id}`} name="price" inputMode="decimal" defaultValue={poundsField(t.pricePence)} /></div>
+                      {clinic.disciplines === "both" ? (
+                        <div>
+                          <label htmlFor={`g${t.id}`}>Discipline</label>
+                          <select id={`g${t.id}`} name="discipline" defaultValue={t.discipline}><option value="physio">Physiotherapy</option><option value="ayurveda">Ayurveda</option></select>
+                        </div>
+                      ) : null}
                     </div>
                     <label className="inline"><input type="checkbox" name="onlineBookable" value="yes" defaultChecked={t.onlineBookable} /> Patients can book this online</label>
                     <label className="inline"><input type="checkbox" name="active" value="yes" defaultChecked={t.active} /> Offered</label>
@@ -86,6 +106,9 @@ async function SettingsBody(user: SessionUser) {
                   <div><label htmlFor="nb">Buffer after (minutes)</label><input id="nb" name="bufferMin" type="number" min={0} max={120} defaultValue={5} /></div>
                   <div><label htmlFor="nc">Colour</label><select id="nc" name="colour">{COLOURS.map((c) => <option key={c}>{c}</option>)}</select></div>
                   <div><label htmlFor="np">Price (£)</label><input id="np" name="price" inputMode="decimal" defaultValue="0.00" /></div>
+                  {clinic.disciplines === "both" ? (
+                    <div><label htmlFor="ng">Discipline</label><select id="ng" name="discipline"><option value="physio">Physiotherapy</option><option value="ayurveda">Ayurveda</option></select></div>
+                  ) : null}
                 </div>
                 <label className="inline"><input type="checkbox" name="onlineBookable" value="yes" defaultChecked /> Patients can book this online</label>
               </ActionForm>

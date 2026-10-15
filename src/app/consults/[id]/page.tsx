@@ -20,6 +20,9 @@ import {
 import { ActionForm, CopyButton, LinkMaker } from "../../Forms";
 import { Header } from "../../Header";
 import { ReviewForm } from "./ReviewForm";
+import { AyurvedaForm } from "./AyurvedaForm";
+import { LIBRARY } from "@/lib/ayurveda/catalogue";
+import { KIND_LABEL, KIND_ORDER } from "@/lib/ayurveda/schemas";
 
 export const dynamic = "force-dynamic";
 
@@ -45,6 +48,7 @@ async function ConsultPageBody({ params }: Props, user: SessionUser) {
   }
   const lines = transcriptLines(c.transcript);
   const approved = c.status === "approved";
+  const ayu = c.discipline === "ayurveda";
   const hasActiveLink = c.links.some((l) => !l.revokedAt && new Date(l.expiresAt) > new Date());
 
   return (
@@ -54,19 +58,23 @@ async function ConsultPageBody({ params }: Props, user: SessionUser) {
         <p className="muted"><Link href="/consults">← All consultations</Link></p>
         <div className="row" style={{ justifyContent: "space-between" }}>
           <h1 style={{ margin: 0 }}>{c.patientLabel}</h1>
-          <span className={`pill ${c.status}`}>{c.status}</span>
+          <span className="row">{ayu ? <span className="pill">Ayurveda</span> : null}<span className={`pill ${c.status}`}>{c.status}</span></span>
         </div>
-        <p className="muted">Treating physio: {c.practitioner}{c.consent ? ` · consent ${c.consent.method}, recorded ${when(c.consent.at)} by ${c.consent.by}` : ""}</p>
+        <p className="muted">{ayu ? "Treating practitioner" : "Treating physio"}: {c.practitioner}{c.consent ? ` · consent ${c.consent.method}, recorded ${when(c.consent.at)} by ${c.consent.by}` : ""}</p>
 
         {c.consentWithdrawnAt && !c.consent ? (
-          <div className="banner warn">Consent was withdrawn on {when(c.consentWithdrawnAt)}. The transcript and drafts were deleted. Record consent again to start over.</div>
+          <div className="banner warn">Consent was withdrawn on {when(c.consentWithdrawnAt)}. {ayu ? "The record and plan were deleted." : "The transcript and drafts were deleted."} Record consent again to start over.</div>
         ) : null}
 
         {/* 1. Consent gate */}
         {!c.consent && !approved ? (
           <section className="card">
             <h2>1. Patient consent</h2>
-            <p>Before any recording or drafting, tell the patient that an AI tool will help draft the note and exercise programme, and that you will review both. Nothing is captured until you record their agreement.</p>
+            {ayu ? (
+              <p>Tell the patient that you will keep a record of this consultation, and that their treatment plan can be sent to them by a private link. No AI tool is used. Nothing is saved until you record their agreement.</p>
+            ) : (
+              <p>Before any recording or drafting, tell the patient that an AI tool will help draft the note and exercise programme, and that you will review both. Nothing is captured until you record their agreement.</p>
+            )}
             <ActionForm action={recordConsentAction} hidden={{ id }} submitLabel="Record consent">
               <label htmlFor="method">How was consent given?</label>
               <select id="method" name="method" defaultValue="verbal">
@@ -74,14 +82,14 @@ async function ConsultPageBody({ params }: Props, user: SessionUser) {
                 <option value="written">Written</option>
               </select>
               <label style={{ fontWeight: 400 }}>
-                <input type="checkbox" name="confirm" value="yes" /> The patient has agreed to AI-assisted note drafting for this consultation.
+                <input type="checkbox" name="confirm" value="yes" /> {ayu ? "The patient has agreed to this record being kept and the plan being sent to them." : "The patient has agreed to AI-assisted note drafting for this consultation."}
               </label>
             </ActionForm>
           </section>
         ) : null}
 
         {/* 2. Transcript */}
-        {c.consent && !approved && c.status !== "drafted" ? (
+        {c.consent && !approved && !ayu && c.status !== "drafted" ? (
           <section className="card">
             <h2>2. Consultation transcript</h2>
             <p className="muted">Type or paste the transcript, one speaker turn per line. Audio capture is not part of this version.</p>
@@ -92,8 +100,20 @@ async function ConsultPageBody({ params }: Props, user: SessionUser) {
           </section>
         ) : null}
 
+        {/* 2 (Ayurveda). Record and plan, written by the practitioner */}
+        {ayu && c.consent && !approved && c.ayurveda ? (
+          <AyurvedaForm
+            key={c.draftedAt ?? "new"}
+            id={id}
+            initialRecord={c.ayurveda.record}
+            initialPlan={c.ayurveda.plan}
+            library={LIBRARY.map((l) => ({ id: l.id, kind: l.kind, name: l.name, where: l.where, instructions: l.instructions, cautions: l.cautions, doshas: l.doshas }))}
+            practitioner={user.name}
+          />
+        ) : null}
+
         {/* 3. Review */}
-        {c.status === "drafted" ? (
+        {!ayu && c.status === "drafted" ? (
           <>
             <section className="card">
               <h2>3. Review</h2>
@@ -131,23 +151,42 @@ async function ConsultPageBody({ params }: Props, user: SessionUser) {
             <section className="card">
               <h2>Approved</h2>
               <div className="banner good">Approved by {c.approval.by} on {when(c.approval.at)}. Reference <span className="mono">{c.approval.hash.slice(0, 12)}</span>.</div>
-              <h3>Programme: {c.approval.programme.title}</h3>
-              <table>
-                <thead><tr><th>Exercise</th><th>Dose</th></tr></thead>
-                <tbody>
-                  {c.approval.programme.items.map((it, i) => (
-                    <tr key={i}>
-                      <td>{CATALOGUE.find((e) => e.id === it.exerciseId)?.name ?? it.exerciseId}</td>
-                      <td>{describeDose(it)}</td>
-                    </tr>
+              {c.approval.ayurveda ? (
+                <>
+                  <h3>Plan: {c.approval.ayurveda.plan.title}</h3>
+                  <p className="muted">Approved under {c.approval.ayurveda.record.qualifications}.</p>
+                  {KIND_ORDER.filter((k) => c.approval!.ayurveda!.plan.items.some((i) => i.kind === k)).map((k) => (
+                    <div key={k}>
+                      <h4>{KIND_LABEL[k]}</h4>
+                      <ul className="plain">
+                        {c.approval!.ayurveda!.plan.items.filter((i) => i.kind === k).map((i, n) => (
+                          <li key={n}><strong>{i.name}</strong>{i.where === "clinic" ? <span className="muted"> · in clinic</span> : null}{i.duration ? <span className="muted"> · {i.duration}</span> : null}<div>{i.instructions}</div></li>
+                        ))}
+                      </ul>
+                    </div>
                   ))}
-                </tbody>
-              </table>
+                </>
+              ) : (
+                <>
+                  <h3>Programme: {c.approval.programme.title}</h3>
+                  <table>
+                    <thead><tr><th>Exercise</th><th>Dose</th></tr></thead>
+                    <tbody>
+                      {c.approval.programme.items.map((it, i) => (
+                        <tr key={i}>
+                          <td>{CATALOGUE.find((e) => e.id === it.exerciseId)?.name ?? it.exerciseId}</td>
+                          <td>{describeDose(it)}</td>
+                        </tr>
+                      ))}
+                    </tbody>
+                  </table>
+                </>
+              )}
             </section>
 
             <section className="card">
               <h2>Send to the patient</h2>
-              <p className="muted">The patient opens the link on their phone with no sign-in. Links expire after 8 weeks and can be revoked.</p>
+              <p className="muted">The patient opens the link on their phone with no sign-in and sees their {ayu ? "plan" : "programme"}. Links expire after 8 weeks and can be revoked.</p>
               <LinkMaker action={createLinkAction} id={id} hasActive={hasActiveLink} />
               {!hasActiveLink && c.links.length > 0 ? (
                 <p className="muted" role="status">No active patient link. The last one {c.links[0].revokedAt ? `was revoked ${when(c.links[0].revokedAt)}` : "has expired"}.</p>
@@ -214,7 +253,7 @@ async function ConsultPageBody({ params }: Props, user: SessionUser) {
                 <ul className="plain">
                   {c.checkIns.map((k) => (
                     <li key={k.id}>
-                      <strong>{when(k.createdAt)}</strong>: exercises done: {k.adherence}; pain: {k.painChange}
+                      <strong>{when(k.createdAt)}</strong>: {ayu ? "followed the plan" : "exercises done"}: {k.adherence}; {ayu ? "symptoms" : "pain"}: {k.painChange}
                       {k.comment ? <div className="muted">“{k.comment}”</div> : null}
                     </li>
                   ))}
@@ -227,8 +266,8 @@ async function ConsultPageBody({ params }: Props, user: SessionUser) {
         {c.consent && !approved ? (
           <section className="card">
             <h2>Patient withdraws consent</h2>
-            <p className="muted">Deletes the transcript and both drafts and stops capture. Use this if the patient changes their mind before approval.</p>
-            <ActionForm action={withdrawConsentAction} hidden={{ id }} submitLabel="Withdraw consent and delete data" submitClass="danger" confirmText="This permanently deletes the transcript and drafts for this consultation. Continue?" />
+            <p className="muted">{ayu ? "Deletes the record and plan and stops further entries. Use this if the patient changes their mind before approval." : "Deletes the transcript and both drafts and stops capture. Use this if the patient changes their mind before approval."}</p>
+            <ActionForm action={withdrawConsentAction} hidden={{ id }} submitLabel="Withdraw consent and delete data" submitClass="danger" confirmText={ayu ? "This permanently deletes the record and plan for this consultation. Continue?" : "This permanently deletes the transcript and drafts for this consultation. Continue?"} />
           </section>
         ) : null}
 

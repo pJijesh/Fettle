@@ -5,18 +5,29 @@ import { DEFAULT_INTAKE_FIELDS } from "./forms";
 /**
  * Starting content for a new clinic, so the diary works on day one. Everything here is editable.
  */
-export function seedClinic(db: Db, clinicId: string, ownerId: string, now: Date = new Date()): Promise<void> {
+export function seedClinic(db: Db, clinicId: string, ownerId: string, now: Date = new Date(), disciplines: "physio" | "ayurveda" | "both" = "physio"): Promise<void> {
   const ts = now.toISOString();
   return db.scope(clinicId, async () => {
-    const types: [string, number, number, string][] = [
-      ["Initial assessment", 45, 5, "blue"],
-      ["Follow-up", 30, 5, "green"],
-      ["Review", 20, 5, "amber"],
-    ];
-    for (const [name, dur, buf, colour] of types) {
-      await db.run("INSERT INTO appointment_types (id, clinic_id, name, duration_min, buffer_min, online_bookable, colour, active) VALUES (?, ?, ?, ?, ?, 1, ?, 1)", [
-        crypto.randomUUID(), clinicId, name, dur, buf, colour,
-      ]);
+    const sets: Record<"physio" | "ayurveda", [string, number, number, string][]> = {
+      physio: [
+        ["Initial assessment", 45, 5, "blue"],
+        ["Follow-up", 30, 5, "green"],
+        ["Review", 20, 5, "amber"],
+      ],
+      ayurveda: [
+        ["Initial Ayurvedic consultation", 60, 10, "purple"],
+        ["Ayurvedic follow-up", 30, 5, "green"],
+        ["Ayurvedic therapy session", 60, 15, "amber"],
+      ],
+    };
+    await db.run("UPDATE clinics SET disciplines = ? WHERE id = ?", [disciplines, clinicId]);
+    for (const d of ["physio", "ayurveda"] as const) {
+      if (disciplines !== "both" && disciplines !== d) continue;
+      for (const [name, dur, buf, colour] of sets[d]) {
+        await db.run("INSERT INTO appointment_types (id, clinic_id, name, duration_min, buffer_min, online_bookable, colour, active, discipline) VALUES (?, ?, ?, ?, ?, 1, ?, 1, ?)", [
+          crypto.randomUUID(), clinicId, name, dur, buf, colour, d,
+        ]);
+      }
     }
     await db.run("INSERT INTO forms (id, clinic_id, name, kind, fields_json, mandatory, active, version, created_at) VALUES (?, ?, 'New patient intake', 'intake', ?, 1, 1, 1, ?)", [
       crypto.randomUUID(), clinicId, JSON.stringify(DEFAULT_INTAKE_FIELDS), ts,

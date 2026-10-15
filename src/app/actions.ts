@@ -14,7 +14,12 @@ export async function createConsultAction(_prev: ActionState, form: FormData): P
   let id: string;
   try {
     id = await getService(user.clinicId).createConsult(
-      { patientLabel: field(form, "patientLabel"), practitioner: field(form, "practitioner"), pmsPatientId: field(form, "pmsPatientId") },
+      {
+        patientLabel: field(form, "patientLabel"),
+        practitioner: field(form, "practitioner"),
+        pmsPatientId: field(form, "pmsPatientId"),
+        discipline: field(form, "discipline") === "ayurveda" ? "ayurveda" : "physio",
+      },
       user.name,
     );
   } catch (err) {
@@ -47,7 +52,7 @@ export async function withdrawConsentAction(_prev: ActionState, form: FormData):
     return fail(err);
   }
   revalidatePath(`/consults/${id}`);
-  return { ok: true, message: "Consent withdrawn. The transcript and drafts were deleted." };
+  return { ok: true, message: "Consent withdrawn. What was recorded was deleted." };
 }
 
 export async function saveTranscriptAction(_prev: ActionState, form: FormData): Promise<ActionState> {
@@ -128,6 +133,40 @@ export async function approveAction(id: string, json: string): Promise<ActionSta
   return { ok: true, message: "Approved." };
 }
 
+function parseAyurveda(json: string): { record: unknown; plan: unknown } {
+  try {
+    const data = JSON.parse(json) as { record?: unknown; plan?: unknown };
+    return { record: data.record, plan: data.plan };
+  } catch {
+    throw new DomainError("validation", "The form could not be read. Reload the page and try again.");
+  }
+}
+
+export async function saveAyurvedaAction(id: string, json: string): Promise<ActionState> {
+  const user = await requireUser(["owner", "clinician"]);
+  try {
+    await getService(user.clinicId).saveAyurveda(id, parseAyurveda(json), user.name);
+  } catch (err) {
+    return fail(err);
+  }
+  revalidatePath(`/consults/${id}`);
+  return { ok: true, message: "Saved." };
+}
+
+/** Saves the on-screen record and plan, then approves. The approver is the signed-in practitioner, never a form field. */
+export async function approveAyurvedaAction(id: string, json: string): Promise<ActionState> {
+  const user = await requireUser(["owner", "clinician"]);
+  try {
+    const svc = getService(user.clinicId);
+    await svc.saveAyurveda(id, parseAyurveda(json), user.name);
+    await svc.approve(id, user.name);
+  } catch (err) {
+    return fail(err);
+  }
+  revalidatePath(`/consults/${id}`);
+  return { ok: true, message: "Approved." };
+}
+
 // ------------------------------------------------------------------ patient link, write-back
 
 export async function createLinkAction(_prev: ActionState, form: FormData): Promise<ActionState> {
@@ -191,7 +230,7 @@ export async function checkInAction(_prev: ActionState, form: FormData): Promise
       painChange: field(form, "painChange"),
       comment: field(form, "comment"),
     });
-    return { ok: true, message: "Thank you. Your physio will see this." };
+    return { ok: true, message: "Thank you. Your practitioner will see this." };
   } catch (err) {
     return fail(err);
   }

@@ -6,7 +6,8 @@ import { Nav, type NavItem } from "./Nav";
 
 const ROLE: Record<SessionUser["role"], string> = { owner: "Owner", clinician: "Clinician", reception: "Reception" };
 
-export function Header({ user }: { user: SessionUser }) {
+export async function Header({ user }: { user: SessionUser }) {
+  const disciplines = (await getPlatform().scheduling.clinic(user.clinicId)).disciplines;
   const provider = getService(user.clinicId).providerInfo;
   const mailer = getPlatform().mailer;
   const items: NavItem[] = [
@@ -20,7 +21,7 @@ export function Header({ user }: { user: SessionUser }) {
   ];
   return (
     <header className="top">
-      {provider.isMock && user.role !== "reception" ? (
+      {provider.isMock && user.role !== "reception" && disciplines !== "ayurveda" ? (
         <div className="banner warn flat">
           <strong>Demo drafting.</strong> No AI model is connected, so drafts come from a simple keyword matcher. They are not clinical output. Do not use with real patients.
         </div>

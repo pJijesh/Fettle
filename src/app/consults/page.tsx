@@ -31,6 +31,7 @@ async function ConsultationsBody(user: SessionUser) {
                 <li key={c.id} className="row" style={{ justifyContent: "space-between" }}>
                   <span>
                     <Link href={`/consults/${c.id}`}>{c.patientLabel}</Link>
+                    {c.discipline === "ayurveda" ? <span className="pill">Ayurveda</span> : null}
                     <span className="muted"> · {c.practitioner} · {new Date(c.updatedAt).toLocaleString("en-GB", { timeZone: "Europe/London" })}</span>
                   </span>
                   <span className={`pill ${c.status}`}>{c.status}</span>

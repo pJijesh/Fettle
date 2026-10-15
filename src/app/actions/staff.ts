@@ -196,8 +196,9 @@ export async function startConsultationAction(_prev: ActionState, form: FormData
     if (a.consultId) consultId = a.consultId;
     else {
       const patient = await p.scheduling.getPatient(user.clinicId, a.patientId);
+      const type = await p.scheduling.getType(user.clinicId, a.typeId);
       consultId = await getService(user.clinicId).createConsult(
-        { patientLabel: `${patient.firstName} ${patient.lastName}`.slice(0, 80), practitioner: a.clinicianName, patientId: a.patientId, appointmentId: a.id },
+        { patientLabel: `${patient.firstName} ${patient.lastName}`.slice(0, 80), practitioner: a.clinicianName, patientId: a.patientId, appointmentId: a.id, discipline: type.discipline },
         user.email,
       );
       await p.scheduling.attachConsult(user.clinicId, a.id, consultId);
@@ -253,7 +254,20 @@ export async function saveTypeAction(_prev: ActionState, form: FormData): Promis
       id: field(form, "id") || undefined, name: field(form, "name"), durationMin: Number(field(form, "durationMin")), bufferMin: Number(field(form, "bufferMin") || 0),
       onlineBookable: bool(form, "onlineBookable"), colour: field(form, "colour"), active: field(form, "id") ? bool(form, "active") : true,
       pricePence: price,
+      discipline: field(form, "discipline") === "ayurveda" ? "ayurveda" : field(form, "discipline") === "physio" ? "physio" : undefined,
     });
+  } catch (err) {
+    return fail(err);
+  }
+  revalidatePath("/settings");
+  return { ok: true, message: "Saved." };
+}
+
+export async function saveDisciplinesAction(_prev: ActionState, form: FormData): Promise<ActionState> {
+  const user = await requireUser(["owner"]);
+  try {
+    const v = field(form, "disciplines");
+    await getPlatform().scheduling.setDisciplines(user.clinicId, user.email, v as "physio" | "ayurveda" | "both");
   } catch (err) {
     return fail(err);
   }
