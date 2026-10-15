@@ -7,6 +7,8 @@ import { DomainError } from "@/lib/errors";
 import { makeLink } from "@/lib/links";
 import { formatLocal, minutesToClock, utcToZoned } from "@/lib/tz";
 import { arrivedAction, cancelAppointmentAction, completedAction, noShowAction, rescheduleAction, startConsultationAction } from "../../actions/staff";
+import { formatPence } from "@/lib/money";
+import { invoiceAppointmentAction } from "../../actions/billing";
 import { ActionForm } from "../../Forms";
 import { Header } from "../../Header";
 
@@ -37,6 +39,9 @@ async function AppointmentPageBody({ params }: Props, user: SessionUser) {
   const start = utcToZoned(new Date(a.startAt), tz);
   const started = new Date(a.startAt) <= p.now();
   const open = a.status === "booked" || a.status === "arrived";
+  const canBill = user.role !== "clinician" && (a.status === "arrived" || a.status === "completed");
+  const invoice = canBill ? await p.billing.liveInvoiceForAppointment(user.clinicId, id) : null;
+  const typePrice = canBill ? (await p.scheduling.getType(user.clinicId, a.typeId)).pricePence : 0;
   const canConsult = user.role !== "reception" && a.status !== "cancelled";
 
   return (
@@ -96,6 +101,30 @@ async function AppointmentPageBody({ params }: Props, user: SessionUser) {
             {a.status === "booked" && started ? (
               <div style={{ marginTop: 12 }}><ActionForm action={noShowAction} hidden={{ id }} submitLabel="Mark as did not attend" submitClass="danger" confirmText="Mark this patient as did not attend?" /></div>
             ) : null}
+          </section>
+        ) : null}
+
+        {canBill ? (
+          <section className="card" aria-labelledby="bill">
+            <h2 id="bill">Invoice</h2>
+            {invoice ? (
+              <p>
+                <Link href={`/billing/${invoice.id}`}>{invoice.number}</Link> · {formatPence(invoice.totalPence)} · {invoice.status.replace("_", " ")}
+              </p>
+            ) : (
+              <ActionForm action={invoiceAppointmentAction} hidden={{ id }} submitLabel={typePrice > 0 ? `Create invoice for ${formatPence(typePrice)}` : "Create invoice"} submitClass="">
+                {typePrice <= 0 ? <div className="banner warn">{a.typeName} has no price yet. Set one in Settings, or <Link href={`/billing/new?patient=${a.patientId}`}>write the invoice by hand</Link>.</div> : null}
+                <fieldset>
+                  <legend>Who pays</legend>
+                  <label className="inline"><input type="radio" name="payerType" value="self" defaultChecked /> The patient</label>
+                  <label className="inline"><input type="radio" name="payerType" value="insurer" /> An insurer</label>
+                  <div className="grid2">
+                    <div><label htmlFor="payerName">Insurer</label><input id="payerName" name="payerName" maxLength={120} /></div>
+                    <div><label htmlFor="claimRef">Claim or policy reference</label><input id="claimRef" name="claimRef" maxLength={80} /></div>
+                  </div>
+                </fieldset>
+              </ActionForm>
+            )}
           </section>
         ) : null}
 

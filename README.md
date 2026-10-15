@@ -20,6 +20,7 @@ This repository holds **Phase 0** (the consultation workflow) and **Phase 1** (t
 | E1.10 Calendar feed | Read-only iCalendar link per clinician, secret URL (hash stored), initials and type only |
 | Account recovery | Forgotten password: emailed single-use link, valid for an hour, same answer whether or not the address has an account; it signs the person out everywhere and does not bypass two-step sign-in. Lost phone: ten single-use recovery codes (shown once, stored hashed), or the owner can reset a colleague's two-step sign-in |
 | Reports | Appointments, seen, did-not-attend and cancellation rates, bookings by source and type, new patients, and per-clinician utilisation for any date range up to a year, in the clinic's time zone. Counts only; no patient is named |
+| Billing | A price on each appointment type; an invoice from an attended appointment in one click, or written by hand; payment recorded by method (cash, card, bank transfer, cheque, insurer) as it comes in, in part or in full; an Outstanding list; patient balance; printable invoice and credit note; revenue, collected-by-method, owed and overdue in Reports. Numbers run without gaps (`INV-000001`, credit notes `CN-000001`). Invoices, lines and payments are append-only in the database: a mistake is cancelled with a credit note (only once nothing is paid on it) and a wrong payment is reversed, and both stay on the record. VAT at one rate set in Settings. Owner and reception only |
 | Operations | `GET /api/health` reports whether the app can reach its database. Errors are logged by code and call stack only, because database messages can quote patient data |
 | E1.11 Switching import | Patients and appointments from **CSV or Excel (.xlsx)** from TM3, Cliniko, WriteUpp or anything else. Per-system export guidance, downloadable templates, and a **column check** where you choose which column goes into which field. Dry run that executes the real import and rolls it back, then confirm, then undo for 7 days. Consent is never imported |
 
@@ -32,7 +33,7 @@ npm install
 cp .env.example .env.local     # set LINK_SECRET (and APP_BASE_URL outside localhost)
 npm run db:up                  # starts Postgres in Docker and applies db/migrations
 npm run dev                    # http://localhost:3000, goes to /setup on first run
-npm test                       # 134 tests, against a real Postgres (see below)
+npm test                       # 158 tests, against a real Postgres (see below)
 npm run typecheck
 npm run build && npm start
 ```
@@ -68,11 +69,12 @@ Tests need a Postgres superuser connection (`TEST_DATABASE_URL`, default `postgr
 | Rate limiting | Shared through Postgres, so it holds across several app instances. Keys are stored hashed |
 | Audio capture and transcription | Not built. Paste or type the transcript |
 | Exercise catalogue, intake form, default hours | Starter content. A clinical lead should review before use |
-| Billing, insurers, card payments, notes templates, reports, mobile apps | Later phases (see the PRD) |
+| **Billing** | Records what was charged and paid; it does not take money. **No card payments** (a Stripe account is needed) and **no insurer claim submission** (insurer name and claim reference are recorded on the invoice, nothing is sent). One VAT rate for the whole invoice; no per-item exemptions. Whether the invoice wording meets your accountant's and any insurer's requirements has not been checked |
+| Notes templates, mobile apps | Later phases (see the PRD) |
 
 ## Checked
 
-- 134 automated tests, each in its own fresh Postgres database under the same row-level security as production: domain rules, accounts and second factor, clock-change days, overlap protection (service and database), truly concurrent booking, clinic separation (database policies and service calls), online booking, manage links, forms, portal codes, waiting list (first accept wins, expiry, matching), outbox idempotency and retries, reminders, calendar feed, import with dry run, column mapping, Excel and undo.
+- 158 automated tests, each in its own fresh Postgres database under the same row-level security as production: domain rules, accounts and second factor, clock-change days, overlap protection (service and database), truly concurrent booking, clinic separation (database policies and service calls), online booking, manage links, forms, portal codes, waiting list (first accept wins, expiry, matching), outbox idempotency and retries, reminders, calendar feed, import with dry run, column mapping, Excel and undo.
 - Browser walkthrough of every screen: first-run set-up and two-step sign-in, booking and portal as a patient on a phone, drag-and-drop on the calendar, role restrictions (reception cannot reach settings, consultations, import or the outbox), lock-out.
 - Automated accessibility scan (axe, WCAG 2.1 AA and best practice) on every page in light and dark, at 390 px and desktop widths, with no violations. This does not replace a manual screen-reader and keyboard review.
 

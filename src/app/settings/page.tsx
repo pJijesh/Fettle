@@ -2,7 +2,9 @@ import Link from "next/link";
 import { requireUser } from "@/lib/auth";
 import type { SessionUser } from "@/lib/accounts";
 import { getPlatform, withClinic } from "@/lib/app";
+import { formatPence, poundsField } from "@/lib/money";
 import { minutesToClock } from "@/lib/tz";
+import { saveBillingSettingsAction } from "../actions/billing";
 import { createUserAction, deactivateUserAction, icalRevokeAction, resetMfaAction, resetPasswordAction, saveHoursAction, saveTypeAction } from "../actions/staff";
 import { ActionForm } from "../Forms";
 import { Header } from "../Header";
@@ -22,6 +24,7 @@ async function SettingsBody(user: SessionUser) {
   const isOwner = user.role === "owner";
   const hasFeed = await p.ical.hasActive(user.clinicId, user.id);
   const types = isOwner ? await p.scheduling.listTypes(user.clinicId) : [];
+  const billing = isOwner ? await p.billing.getSettings(user.clinicId) : null;
   const staff = isOwner ? await p.accounts.listUsers(user.clinicId) : [];
   const clinic = await p.scheduling.clinic(user.clinicId);
   const clinicianHours = isOwner
@@ -61,13 +64,14 @@ async function SettingsBody(user: SessionUser) {
               <h2 id="types">Appointment types</h2>
               {types.map((t) => (
                 <details key={t.id} className="sub">
-                  <summary>{t.name} · {t.durationMin} min{t.bufferMin ? ` + ${t.bufferMin} buffer` : ""}{t.active ? "" : " · not offered"}{t.onlineBookable ? " · online" : ""}</summary>
+                  <summary>{t.name} · {t.durationMin} min{t.pricePence ? ` · ${formatPence(t.pricePence)}` : ""}{t.bufferMin ? ` + ${t.bufferMin} buffer` : ""}{t.active ? "" : " · not offered"}{t.onlineBookable ? " · online" : ""}</summary>
                   <ActionForm action={saveTypeAction} hidden={{ id: t.id }} submitLabel="Save type" submitClass="">
                     <div className="grid2">
                       <div><label htmlFor={`n${t.id}`}>Name</label><input id={`n${t.id}`} name="name" defaultValue={t.name} required /></div>
                       <div><label htmlFor={`d${t.id}`}>Minutes</label><input id={`d${t.id}`} name="durationMin" type="number" min={5} max={480} defaultValue={t.durationMin} required /></div>
                       <div><label htmlFor={`b${t.id}`}>Buffer after (minutes)</label><input id={`b${t.id}`} name="bufferMin" type="number" min={0} max={120} defaultValue={t.bufferMin} /></div>
                       <div><label htmlFor={`c${t.id}`}>Colour</label><select id={`c${t.id}`} name="colour" defaultValue={t.colour}>{COLOURS.map((c) => <option key={c}>{c}</option>)}</select></div>
+                      <div><label htmlFor={`p${t.id}`}>Price (£)</label><input id={`p${t.id}`} name="price" inputMode="decimal" defaultValue={poundsField(t.pricePence)} /></div>
                     </div>
                     <label className="inline"><input type="checkbox" name="onlineBookable" value="yes" defaultChecked={t.onlineBookable} /> Patients can book this online</label>
                     <label className="inline"><input type="checkbox" name="active" value="yes" defaultChecked={t.active} /> Offered</label>
@@ -81,10 +85,29 @@ async function SettingsBody(user: SessionUser) {
                   <div><label htmlFor="nd">Minutes</label><input id="nd" name="durationMin" type="number" min={5} max={480} defaultValue={30} required /></div>
                   <div><label htmlFor="nb">Buffer after (minutes)</label><input id="nb" name="bufferMin" type="number" min={0} max={120} defaultValue={5} /></div>
                   <div><label htmlFor="nc">Colour</label><select id="nc" name="colour">{COLOURS.map((c) => <option key={c}>{c}</option>)}</select></div>
+                  <div><label htmlFor="np">Price (£)</label><input id="np" name="price" inputMode="decimal" defaultValue="0.00" /></div>
                 </div>
                 <label className="inline"><input type="checkbox" name="onlineBookable" value="yes" defaultChecked /> Patients can book this online</label>
               </ActionForm>
             </section>
+
+            {billing ? (
+              <section className="card" aria-labelledby="billing">
+                <h2 id="billing">Billing</h2>
+                <p className="muted">Prices are set on each appointment type above. These settings apply to every invoice from now on; invoices already issued do not change.</p>
+                <ActionForm action={saveBillingSettingsAction} submitLabel="Save billing settings" submitClass="">
+                  <div className="grid2">
+                    <div><label htmlFor="ip">Invoice number prefix</label><input id="ip" name="invoicePrefix" defaultValue={billing.invoicePrefix} maxLength={8} required /></div>
+                    <div><label htmlFor="cp">Credit note prefix</label><input id="cp" name="creditPrefix" defaultValue={billing.creditPrefix} maxLength={8} required /></div>
+                    <div><label htmlFor="vr">VAT rate (%)</label><input id="vr" name="vatRate" inputMode="decimal" defaultValue={String(billing.vatRateBp / 100)} /></div>
+                    <div><label htmlFor="pt">Payment terms (days)</label><input id="pt" name="paymentTermsDays" type="number" min={0} max={365} defaultValue={billing.paymentTermsDays} required /></div>
+                  </div>
+                  <label htmlFor="bd">Details printed on invoices</label>
+                  <textarea id="bd" name="billingDetails" rows={4} maxLength={1000} defaultValue={billing.billingDetails} />
+                  <p className="muted">Your trading name, address, VAT number if you are registered, and how to pay (bank details). Leave the VAT rate at 0 if you are not VAT registered.</p>
+                </ActionForm>
+              </section>
+            ) : null}
 
             <section className="card" aria-labelledby="hours">
               <h2 id="hours">Working hours</h2>

@@ -15,6 +15,7 @@ export function Header({ user }: { user: SessionUser }) {
     { href: "/waitlist", label: "Waiting list" },
     ...(user.role !== "reception" ? [{ href: "/consults", label: "Consultations" }] : []),
     ...(user.role !== "reception" ? [{ href: "/reports", label: "Reports" }] : []),
+    ...(user.role !== "clinician" ? [{ href: "/billing", label: "Billing" }] : []),
     { href: "/settings", label: "Settings" },
   ];
   return (

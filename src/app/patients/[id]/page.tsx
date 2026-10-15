@@ -4,6 +4,7 @@ import { requireUser } from "@/lib/auth";
 import type { SessionUser } from "@/lib/accounts";
 import { getPlatform, withClinic } from "@/lib/app";
 import { DomainError } from "@/lib/errors";
+import { formatPence } from "@/lib/money";
 import { formatLocal } from "@/lib/tz";
 import { addWaitlistAction, mergePatientsAction, updatePatientAction } from "../../actions/staff";
 import { ActionForm } from "../../Forms";
@@ -54,6 +55,9 @@ async function PatientPageBody({ params, searchParams }: Props, user: SessionUse
   const onList = (await p.waitlist.list(user.clinicId)).filter((w) => w.patientId === id);
   const mergeCandidates = mq ? (await p.scheduling.searchPatients(user.clinicId, mq, 10)).filter((c) => c.id !== id) : [];
   const dupes = await p.scheduling.findDuplicates(user.clinicId, patient, id);
+  const canBill = user.role !== "clinician";
+  const invoices = canBill ? await p.billing.listInvoices(user.clinicId, { patientId: id, limit: 50 }) : [];
+  const owed = canBill ? await p.billing.patientBalance(user.clinicId, id) : 0;
   const defaultFrom = now.toISOString().slice(0, 10);
   const defaultTo = new Date(now.getTime() + 28 * 86_400_000).toISOString().slice(0, 10);
 
@@ -70,6 +74,26 @@ async function PatientPageBody({ params, searchParams }: Props, user: SessionUse
           <div className="banner warn" style={{ marginTop: 12 }}>
             Possible duplicate: {dupes.map((d, i) => <span key={d.id}>{i ? ", " : ""}<Link href={`/patients/${d.id}`}>{d.firstName} {d.lastName}</Link></span>)}. You can merge below.
           </div>
+        ) : null}
+
+        {canBill ? (
+          <section className="card" aria-labelledby="bills">
+            <div className="row" style={{ justifyContent: "space-between" }}>
+              <h2 id="bills" style={{ margin: 0 }}>Billing</h2>
+              <Link className="btn" href={`/billing/new?patient=${id}`}>New invoice</Link>
+            </div>
+            <p>{owed > 0 ? <><strong>{formatPence(owed)}</strong> owed</> : <span className="muted">Nothing owed.</span>}</p>
+            {invoices.length ? (
+              <ul className="plain">
+                {invoices.map((i) => (
+                  <li key={i.id} className="row" style={{ justifyContent: "space-between" }}>
+                    <span><Link href={`/billing/${i.id}`}>{i.number}</Link> · {formatLocal(i.issuedAt, tz, "date")}</span>
+                    <span>{formatPence(i.totalPence)} <span className="muted">· {i.status.replace("_", " ")}</span></span>
+                  </li>
+                ))}
+              </ul>
+            ) : null}
+          </section>
         ) : null}
 
         <section className="card" aria-labelledby="appts">

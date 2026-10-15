@@ -2,6 +2,7 @@ import { requireUser } from "@/lib/auth";
 import type { SessionUser } from "@/lib/accounts";
 import { getPlatform, withClinic } from "@/lib/app";
 import { DomainError } from "@/lib/errors";
+import { formatPence } from "@/lib/money";
 import { Header } from "../Header";
 
 export const dynamic = "force-dynamic";
@@ -29,6 +30,8 @@ async function ReportsBody(user: SessionUser, sp: { from?: string; to?: string }
     if (err instanceof DomainError) error = err.message;
     else throw err;
   }
+  const money = r && user.role === "owner" ? await getPlatform().billing.summary(user.clinicId, from, to) : null;
+  const METHOD: Record<string, string> = { cash: "Cash", card: "Card", bank_transfer: "Bank transfer", cheque: "Cheque", insurer: "Insurer", other: "Other" };
   return (
     <>
       <Header user={user} />
@@ -54,6 +57,19 @@ async function ReportsBody(user: SessionUser, sp: { from?: string; to?: string }
                 <div><dt>New patients</dt><dd>{r.newPatients}</dd></div>
               </dl>
             </section>
+            {money ? (
+              <section className="card" aria-labelledby="money">
+                <h2 id="money">Money</h2>
+                <dl className="stats">
+                  <div><dt>Invoiced</dt><dd>{formatPence(money.invoicedPence)} <span className="muted">({money.invoiceCount})</span></dd></div>
+                  <div><dt>Credited</dt><dd>{formatPence(money.creditedPence)}</dd></div>
+                  <div><dt>Collected</dt><dd>{formatPence(money.collectedPence)}</dd></div>
+                  <div><dt>Owed now</dt><dd>{formatPence(money.outstandingPence)}</dd></div>
+                  <div><dt>Overdue now</dt><dd>{formatPence(money.overduePence)}</dd></div>
+                </dl>
+                {money.byMethod.length ? <p className="muted">Collected by {money.byMethod.map((m) => `${METHOD[m.method].toLowerCase()} ${formatPence(m.pence)}`).join(", ")}. Invoiced and credited count by the date issued; collected counts by the date received. Owed and overdue are as of today, whatever the range.</p> : <p className="muted">Invoiced and credited count by the date issued; collected counts by the date received. Owed and overdue are as of today, whatever the range.</p>}
+              </section>
+            ) : null}
             <section className="card tablewrap" tabIndex={0} role="region" aria-label="Clinicians, scrollable table">
               <h2>By clinician</h2>
               {r.byClinician.length === 0 ? <p className="muted">No clinicians or appointments in this range.</p> : (

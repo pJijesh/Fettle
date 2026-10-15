@@ -10,6 +10,7 @@ import { baseUrl, fail, field, type ActionState } from "@/lib/action-util";
 import type { PatientInput } from "@/lib/scheduling";
 import type { ImportKind, ImportSource } from "@/lib/import-meta";
 import { readTable } from "@/lib/sheet";
+import { parsePounds } from "@/lib/money";
 
 const bool = (form: FormData, name: string) => form.get(name) === "yes";
 
@@ -241,9 +242,17 @@ export async function removeWaitlistAction(_prev: ActionState, form: FormData): 
 export async function saveTypeAction(_prev: ActionState, form: FormData): Promise<ActionState> {
   const user = await requireUser(["owner"]);
   try {
+    const priceText = field(form, "price").trim();
+    let price: number | undefined;
+    if (priceText) {
+      const v = parsePounds(priceText);
+      if (v === null) throw new DomainError("validation", "Enter the price in pounds, like 45 or 45.50", [{ path: "price", message: "Enter the price in pounds, like 45 or 45.50" }]);
+      price = v;
+    }
     await getPlatform().scheduling.saveType(user.clinicId, user.email, {
       id: field(form, "id") || undefined, name: field(form, "name"), durationMin: Number(field(form, "durationMin")), bufferMin: Number(field(form, "bufferMin") || 0),
       onlineBookable: bool(form, "onlineBookable"), colour: field(form, "colour"), active: field(form, "id") ? bool(form, "active") : true,
+      pricePence: price,
     });
   } catch (err) {
     return fail(err);
