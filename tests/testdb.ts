@@ -38,6 +38,8 @@ export async function createTestDb(): Promise<TestDb> {
   await boot.end();
   const db = new Db(createPool(withDb(ADMIN, name, "fettle_app", "fettle_app"), 5));
   const admin = new pg.Pool({ connectionString: withDb(ADMIN, name), max: 2 });
+  // The database is dropped with FORCE at teardown, which ends idle connections; that is expected.
+  admin.on("error", () => {});
   const all = async <T>(sql: string, params: unknown[] = []) => (await admin.query(numberPlaceholders(sql), params)).rows as T[];
   return {
     db,

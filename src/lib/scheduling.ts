@@ -53,6 +53,7 @@ export interface AppointmentType {
   onlineBookable: boolean;
   colour: string;
   active: boolean;
+  pricePence: number;
 }
 
 export interface Slot {
@@ -315,6 +316,7 @@ export class Scheduling {
       onlineBookable: !!r.online_bookable,
       colour: r.colour as string,
       active: !!r.active,
+      pricePence: Number(r.price_pence ?? 0),
     };
   }
 
@@ -337,8 +339,9 @@ export class Scheduling {
     });
   }
 
-  private typeIssues(i: { name: string; durationMin: number; bufferMin: number; colour: string }) {
+  private typeIssues(i: { name: string; durationMin: number; bufferMin: number; colour: string; pricePence?: number }) {
     const issues = [];
+    if (i.pricePence !== undefined && (!Number.isInteger(i.pricePence) || i.pricePence < 0 || i.pricePence > 10_000_000)) issues.push(issue("price", "Enter a price of £0 or more"));
     if (!i.name.trim()) issues.push(issue("name", "Enter a name"));
     if (!Number.isInteger(i.durationMin) || i.durationMin < 5 || i.durationMin > 480) issues.push(issue("durationMin", "Duration must be 5 to 480 minutes"));
     if (!Number.isInteger(i.bufferMin) || i.bufferMin < 0 || i.bufferMin > 120) issues.push(issue("bufferMin", "Buffer must be 0 to 120 minutes"));
@@ -346,25 +349,25 @@ export class Scheduling {
     return issues;
   }
 
-  saveType(
+  async saveType(
     clinicId: string,
     by: string,
-    input: { id?: string; name: string; durationMin: number; bufferMin: number; onlineBookable: boolean; colour: string; active?: boolean },
+    input: { id?: string; name: string; durationMin: number; bufferMin: number; onlineBookable: boolean; colour: string; active?: boolean; pricePence?: number },
   ): Promise<string> {
     const issues = this.typeIssues(input);
     if (issues.length) throw new DomainError("validation", "Check the appointment type", issues);
     return this.db.scope(clinicId, async () => {
       if (input.id) {
         await this.getType(clinicId, input.id);
-        await this.db.run("UPDATE appointment_types SET name=?, duration_min=?, buffer_min=?, online_bookable=?, colour=?, active=? WHERE id=? AND clinic_id=?", [
-          input.name.trim(), input.durationMin, input.bufferMin, input.onlineBookable ? 1 : 0, input.colour, input.active === false ? 0 : 1, input.id, clinicId,
+        await this.db.run("UPDATE appointment_types SET name=?, duration_min=?, buffer_min=?, online_bookable=?, colour=?, active=?, price_pence=COALESCE(?, price_pence) WHERE id=? AND clinic_id=?", [
+          input.name.trim(), input.durationMin, input.bufferMin, input.onlineBookable ? 1 : 0, input.colour, input.active === false ? 0 : 1, input.pricePence ?? null, input.id, clinicId,
         ]);
         await this.audit(clinicId, by, "appointment_type.updated", "appointment_type", { id: input.id });
         return input.id;
       }
       const id = crypto.randomUUID();
-      await this.db.run("INSERT INTO appointment_types (id, clinic_id, name, duration_min, buffer_min, online_bookable, colour, active) VALUES (?, ?, ?, ?, ?, ?, ?, 1)", [
-        id, clinicId, input.name.trim(), input.durationMin, input.bufferMin, input.onlineBookable ? 1 : 0, input.colour,
+      await this.db.run("INSERT INTO appointment_types (id, clinic_id, name, duration_min, buffer_min, online_bookable, colour, active, price_pence) VALUES (?, ?, ?, ?, ?, ?, ?, 1, ?)", [
+        id, clinicId, input.name.trim(), input.durationMin, input.bufferMin, input.onlineBookable ? 1 : 0, input.colour, input.pricePence ?? 0,
       ]);
       await this.audit(clinicId, by, "appointment_type.created", "appointment_type", { id });
       return id;

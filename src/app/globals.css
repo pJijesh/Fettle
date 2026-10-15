@@ -128,3 +128,4 @@ legend { font-weight: 600; font-size: .92rem; padding: 0 6px; }
 .stats dt { color: var(--muted); font-size: .85rem; }
 .stats dd { margin: 2px 0 0; font-size: 1.4rem; font-weight: 600; }
 .stats dd .muted { font-size: .8rem; font-weight: 400; }
+.sr-only { position: absolute; width: 1px; height: 1px; padding: 0; margin: -1px; overflow: hidden; clip: rect(0, 0, 0, 0); white-space: nowrap; border: 0; }

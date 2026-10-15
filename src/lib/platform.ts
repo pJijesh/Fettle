@@ -7,6 +7,7 @@ import { Ical } from "./ical";
 import { Importer } from "./importer";
 import { Notifier } from "./notify";
 import { DevMailer, Outbox, type Mailer } from "./outbox";
+import { Billing } from "./billing";
 import { Reports } from "./reports";
 import { Scheduling } from "./scheduling";
 import { Waitlist } from "./waitlist";
@@ -27,6 +28,7 @@ export function createPlatform(db: Db, opts: { now?: () => Date; baseUrl?: () =>
   const ical = new Ical(db, now);
   const importer = new Importer(db, scheduling, now);
   const reports = new Reports(db, now);
+  const billing = new Billing(db, scheduling, now);
 
   accounts.setResetHook((m) => notifier.passwordReset(m.clinicId, m.to, m.name, m.token).then(() => undefined));
 
@@ -92,7 +94,7 @@ export function createPlatform(db: Db, opts: { now?: () => Date; baseUrl?: () =>
     return total;
   }
 
-  return { db, now, accounts, scheduling, forms, booking, waitlist, outbox, notifier, ical, importer, reports, mailer, tick, baseUrl };
+  return { db, now, accounts, scheduling, forms, booking, waitlist, outbox, notifier, ical, importer, reports, billing, mailer, tick, baseUrl };
 }
 
 export type Platform = ReturnType<typeof createPlatform>;
