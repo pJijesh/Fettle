@@ -11,6 +11,7 @@ import { addWaitlistAction, mergePatientsAction, updatePatientAction } from "../
 import { ActionForm } from "../../Forms";
 import { Header } from "../../Header";
 import { PatientFields } from "../PatientFields";
+import { ProgressView } from "./Progress";
 
 export const dynamic = "force-dynamic";
 
@@ -43,6 +44,7 @@ async function PatientPageBody({ params, searchParams }: Props, user: SessionUse
     );
   }
   const tz = (await p.scheduling.clinic(user.clinicId)).timezone;
+  const progress = user.role !== "reception" ? await p.progress.forPatient(user, id) : null;
   const now = p.now();
   const appts = await p.scheduling.listAppointments(user.clinicId, {
     patientId: id, includeCancelled: true,
@@ -120,6 +122,13 @@ async function PatientPageBody({ params, searchParams }: Props, user: SessionUse
             </div>
           ) : null}
         </section>
+
+        {user.role !== "reception" ? (
+          <section className="card" aria-labelledby="prog">
+            <h2 id="prog">Progress</h2>
+            <ProgressView patientId={id} series={progress!.series} visits={progress!.visits.length} checkIns={progress!.checkIns} isMock={getPlatform().documents.assistInfo.isMock} />
+          </section>
+        ) : null}
 
         {user.role !== "reception" ? (
           <section className="card" aria-labelledby="cons">

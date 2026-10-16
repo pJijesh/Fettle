@@ -84,6 +84,8 @@ These are targets for a pilot, not claims. No pilot has run yet.
 | C11 | Plain-English patient summary at two reading levels and in a chosen language; shown on the patient link only after the practitioner finalises; can be withdrawn | Built. A translation needs a fluent speaker to check it before finalising |
 | C12 | Note check before approval: plain rules plus an AI second reader that must cite transcript lines; advice only | Built |
 | C13 | Diagnosis-code (ICD-10) suggestions from the approved note to help complete an insurance claim | Built as suggestions only; the insurer's own code set and rules are not known until Healthcode supplies them |
+| C14 | Progress view: outcome measures charted across approved visits beside patient check-ins, with a clinician-only AI summary since the last visit (not stored) | Built |
+| C15 | Check-in triage: plain rules put worrying check-ins on a Check-ins list until a clinician marks them seen; optional AI second reader (owner switch, off by default) can only raise | Built; the list is a help, not a guarantee |
 | C10 | Live AI drafting using the Anthropic provider | Built, never run live |
 
 ### 4.2 Ayurveda
@@ -231,7 +233,7 @@ Access to billing is owner and reception only. Clinicians are denied.
 | Money | Whole pence everywhere |
 | Drafting | Provider interface: a labelled mock by default; Anthropic available |
 
-Migrations: 0001 schema, 0002 hardening, 0003 billing, 0004 Ayurveda, 0005 records and VAT number, 0006 form discipline, 0007 card payment ids, 0008 note templates, 0009 documents.
+Migrations: 0001 schema, 0002 hardening, 0003 billing, 0004 Ayurveda, 0005 records and VAT number, 0006 form discipline, 0007 card payment ids, 0008 note templates, 0009 documents, 0010 check-in triage.
 
 Repository layout is in the README.
 
@@ -249,7 +251,7 @@ Patient export, anonymisation and retention (P3 to P5) · Content-Security-Polic
 
 ### Built since (merged)
 
-Email and text through real providers (tested against stand-ins) · Ayurveda intake form · card payments through Stripe (tested against a stand-in) · note templates · audio capture · letters, patient summaries, note check and code suggestions. 263 tests pass.
+Email and text through real providers (tested against stand-ins) · Ayurveda intake form · card payments through Stripe (tested against a stand-in) · note templates · audio capture · letters, patient summaries, note check and code suggestions · progress view and check-in triage. 273 tests pass.
 
 ### Next, in order
 

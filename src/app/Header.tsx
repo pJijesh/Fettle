@@ -10,11 +10,13 @@ export async function Header({ user }: { user: SessionUser }) {
   const disciplines = (await getPlatform().scheduling.clinic(user.clinicId)).disciplines;
   const provider = getService(user.clinicId).providerInfo;
   const mailer = getPlatform().mailer;
+  const open = user.role !== "reception" ? await getPlatform().triage.countOpen(user.clinicId) : 0;
   const items: NavItem[] = [
     { href: "/calendar", label: "Calendar" },
     { href: "/patients", label: "Patients" },
     { href: "/waitlist", label: "Waiting list" },
     ...(user.role !== "reception" ? [{ href: "/consults", label: "Consultations" }] : []),
+    ...(user.role !== "reception" ? [{ href: "/check-ins", label: open > 0 ? `Check-ins (${open})` : "Check-ins" }] : []),
     ...(user.role !== "reception" ? [{ href: "/reports", label: "Reports" }] : []),
     ...(user.role !== "clinician" ? [{ href: "/billing", label: "Billing" }] : []),
     { href: "/settings", label: "Settings" },

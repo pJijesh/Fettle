@@ -74,6 +74,14 @@ Letters, patient summaries, the note second look and code suggestions use the sa
 - **Safeguards.** Nothing is written to a patient or another clinician automatically. An assistant finding with no valid transcript line is dropped. Code suggestions that do not look like ICD-10 codes are dropped, and at most three are shown. If the assistant is unavailable, the plain note checks still run and drafting says so.
 - **Not covered.** Ayurvedic records have no AI. Summaries in languages other than English can be wrong in ways the practitioner cannot see; the screen says to have a fluent speaker check them before finalising.
 
+## Check-in triage and progress
+
+Check-ins are sorted on arrival by plain rules (stored on the check-in with a one-line reason). Anything that says pain is worse, no exercises with no improvement, or a comment that mentions numbness, a fall, bladder or bowel change, fever, chest pain, severe night pain and similar appears under **Check-ins** for owners and clinicians until someone marks it seen (audited as `check_in.reviewed`). The list is a help: clinicians still need to read check-ins on each consultation.
+
+- **AI second reader (owner setting "Patient check-ins", off by default).** When on, the comment text of a check-in the rules called routine is sent to the model chosen by `AI_PROVIDER`. Nothing else is sent: no name, date of birth or contact details. The model can only raise a check-in to "needs a look"; a failure leaves the rules' answer. Switching it on sends patient free text to the model vendor, so the privacy notice and DPIA must cover it first.
+- **Progress summary.** The "Summarise since the last visit" button sends outcome-measure scores and check-in answers (without identifiers) to the model for a clinician-only summary. It is not stored; the audit log records only that it was run (`progress.summarised`).
+- **Migration 0010** adds triage columns to `check_ins` and the clinic setting `ai_triage`.
+
 ## Deploying and upgrading
 
 1. Take a backup (below).
@@ -156,4 +164,5 @@ Alert on: `level":"error"`, `/api/health` failing, a `tick` line with `failed` o
 - Card payments: tested against a local stand-in for Stripe's API (link creation, signature checking, once-only recording, unapplied payments, wrong clinic). A local run recorded a signed test notification once and ignored a repeat and a bad signature. Never against Stripe itself.
 - Audio capture: tested against a local stand-in for Azure's speech API (request shape, speaker renumbering, failures reduced to a status code) and in a browser with a fake microphone (record, stop, text added, swap labels, a 30 MB upload, wrong type, missing confirmation, signed out). Never against the real service or a real microphone.
 - AI assistance: tested with a scripted assistant (what is sent and not sent, approved-only, edit and finalise rules, withdrawal, failure saves nothing, clinic separation, anonymise and export) and in a browser with the demo assistant. The live Anthropic API has not been called for these tasks.
+- Progress and check-in triage: tested with a scripted assistant (rules, assistant can only raise, failure falls back, comment-only data sent, owner-only switch, clinic separation) and in a browser with the demo assistant (Check-ins list, chart and table, summary, Settings). The live API has not been called.
 - Not yet tested: a managed Postgres, a scheduled job, off-site copy, restore onto a different server, restore timing at real data sizes.

@@ -18,6 +18,7 @@ import { AyurvedaDraft, AyurvedaPlan, AyurvedaRecord, KIND_ORDER, emptyPlan, emp
 import { ayurvedaApprovalIssues } from "./ayurveda/validation";
 import { ayurvedaNoteToText } from "./ayurveda/format";
 import type { WritebackTarget } from "./writeback/types";
+import { ruleTriage } from "./triage";
 import { baseMime, formatLines, isAudioType, MAX_AUDIO_BYTES, type Transcriber } from "./speech/types";
 
 export type Discipline = "physio" | "ayurveda";
@@ -708,21 +709,24 @@ export class Service {
     });
   }
 
-  async submitCheckIn(token: string, input: unknown): Promise<void> {
-    const done = await this.viaToken<true | DomainError>(token, async (link, clinicId) => {
+  async submitCheckIn(token: string, input: unknown): Promise<{ checkInId: string; clinicId: string }> {
+    const done = await this.viaToken<{ checkInId: string; clinicId: string } | DomainError>(token, async (link, clinicId) => {
       const parsed = CheckInInput.safeParse(input);
       if (!parsed.success) return new DomainError("validation", "Choose how the exercises went and how the pain is");
       const since = new Date(this.now().getTime() - 86_400_000).toISOString();
       const recent = await this.db.get<{ n: number }>("SELECT COUNT(*) AS n FROM check_ins WHERE link_id = ? AND created_at > ?", [link.id, since]);
       if (Number(recent?.n ?? 0) >= CHECKINS_PER_DAY) return new DomainError("rate_limited", "That is enough check-ins for today. Thank you.");
-      await this.db.run("INSERT INTO check_ins (id, clinic_id, consult_id, link_id, adherence, pain_change, comment, created_at) VALUES (?, ?, ?, ?, ?, ?, ?, ?)", [
-        crypto.randomUUID(), clinicId, link.consult_id, link.id, parsed.data.adherence, parsed.data.painChange, parsed.data.comment, this.ts(),
+      const triage = ruleTriage(parsed.data.adherence, parsed.data.painChange, parsed.data.comment);
+      const checkInId = crypto.randomUUID();
+      await this.db.run("INSERT INTO check_ins (id, clinic_id, consult_id, link_id, adherence, pain_change, comment, created_at, triage_level, triage_reason, triage_source) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, 'rules')", [
+        checkInId, clinicId, link.consult_id, link.id, parsed.data.adherence, parsed.data.painChange, parsed.data.comment, this.ts(), triage.level, triage.reason,
       ]);
-      await this.audit(link.consult_id, "patient", "check_in.submitted", { adherence: parsed.data.adherence, painChange: parsed.data.painChange }, clinicId);
-      return true;
+      await this.audit(link.consult_id, "patient", "check_in.submitted", { adherence: parsed.data.adherence, painChange: parsed.data.painChange, triage: triage.level }, clinicId);
+      return { checkInId, clinicId };
     });
     if (done === null) throw new DomainError("not_found", "This link is no longer active");
     if (done instanceof DomainError) throw done;
+    return done;
   }
 
   // ---------------------------------------------------------------- write-back (R5) and copy-ready fallback
