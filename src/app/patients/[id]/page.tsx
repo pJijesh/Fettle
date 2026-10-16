@@ -6,6 +6,7 @@ import { getPlatform, withClinic } from "@/lib/app";
 import { DomainError } from "@/lib/errors";
 import { formatPence } from "@/lib/money";
 import { formatLocal } from "@/lib/tz";
+import { anonymisePatientAction } from "../../actions/records";
 import { addWaitlistAction, mergePatientsAction, updatePatientAction } from "../../actions/staff";
 import { ActionForm } from "../../Forms";
 import { Header } from "../../Header";
@@ -58,6 +59,7 @@ async function PatientPageBody({ params, searchParams }: Props, user: SessionUse
   const canBill = user.role !== "clinician";
   const invoices = canBill ? await p.billing.listInvoices(user.clinicId, { patientId: id, limit: 50 }) : [];
   const owed = canBill ? await p.billing.patientBalance(user.clinicId, id) : 0;
+  const retention = user.role === "owner" && !patient.anonymisedAt ? (await p.records.dueForReview(user.clinicId, 1000)).some((d) => d.patientId === id) : false;
   const defaultFrom = now.toISOString().slice(0, 10);
   const defaultTo = new Date(now.getTime() + 28 * 86_400_000).toISOString().slice(0, 10);
 
@@ -70,6 +72,7 @@ async function PatientPageBody({ params, searchParams }: Props, user: SessionUse
           <h1 style={{ margin: 0 }}>{patient.firstName} {patient.lastName}</h1>
           <Link className="btn primary" href={`/appointments/new?patient=${id}`}>Book appointment</Link>
         </div>
+        {patient.anonymisedAt ? <div className="banner" style={{ marginTop: 12 }}>This person was anonymised on {patient.anonymisedAt.slice(0, 10)}. Their name and contact details are gone; the clinical and financial record remains.</div> : null}
         {dupes.length ? (
           <div className="banner warn" style={{ marginTop: 12 }}>
             Possible duplicate: {dupes.map((d, i) => <span key={d.id}>{i ? ", " : ""}<Link href={`/patients/${d.id}`}>{d.firstName} {d.lastName}</Link></span>)}. You can merge below.
@@ -185,6 +188,30 @@ async function PatientPageBody({ params, searchParams }: Props, user: SessionUse
                 </ActionForm>
               </div>
             ))}
+          </section>
+        ) : null}
+        {user.role === "owner" && !patient.anonymisedAt ? (
+          <section className="card" aria-labelledby="rights">
+            <h2 id="rights">Their data</h2>
+            <p className="muted">Give the person a copy of everything held about them, or remove their identity. Both are recorded in the audit log.</p>
+            <p><a className="btn" href={`/patients/${id}/export`} download>Download all their data (JSON)</a></p>
+            <h3>Remove their identity</h3>
+            <p className="muted">
+              Name, contact details, date of birth, GP, address, consent marks, portal sign-ins, patient links and consultation transcripts are removed.
+              Appointments, consultation records and invoices stay because they must be kept, but no longer say who they belong to. This cannot be undone.
+              Free text a practitioner typed into a note is not searched for names.
+            </p>
+            <ActionForm action={anonymisePatientAction} hidden={{ patientId: id }} submitLabel="Remove their identity" submitClass="danger">
+              {retention ? <p className="muted">The retention period has ended for this record.</p> : (
+                <>
+                  <p className="muted">The retention period has not ended. Only do this early if the person has asked for erasure and you have taken advice that it can go sooner.</p>
+                  <label className="inline"><input type="checkbox" name="early" value="yes" /> Do this before the retention period ends</label>
+                  <label htmlFor="reason">Reason (recorded)</label>
+                  <input id="reason" name="reason" autoComplete="off" />
+                </>
+              )}
+              <label className="inline"><input type="checkbox" name="confirm" value="yes" /> I understand this cannot be undone</label>
+            </ActionForm>
           </section>
         ) : null}
       </main>

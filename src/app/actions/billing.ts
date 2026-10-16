@@ -25,6 +25,7 @@ export async function saveBillingSettingsAction(_prev: ActionState, form: FormDa
       invoicePrefix: field(form, "invoicePrefix"),
       creditPrefix: field(form, "creditPrefix"),
       vatRateBp: Number.isFinite(vat) ? Math.round(vat * 100) : -1,
+      vatNumber: field(form, "vatNumber"),
       billingDetails: field(form, "billingDetails"),
       paymentTermsDays: Number(field(form, "paymentTermsDays")),
     });

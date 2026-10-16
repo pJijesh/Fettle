@@ -32,3 +32,5 @@ jobs:
       - run: npm run typecheck
       - run: npm test
       - run: npm run build
+      # Known-vulnerable runtime dependencies fail the build. Dev-only packages are not shipped, so they are left out.
+      - run: npm audit --omit=dev --audit-level=high

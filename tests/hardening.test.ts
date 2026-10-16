@@ -1,7 +1,7 @@
 import { describe, expect, it } from "vitest";
 import { Db, createPool } from "@/lib/db";
 import { allowOn } from "@/lib/session";
-import { describeError } from "@/lib/log";
+import { describeError, logLine } from "@/lib/log";
 import { DomainError } from "@/lib/errors";
 import { totpAt, totpStep } from "@/lib/crypto";
 import { newTestDb } from "./helpers";
@@ -252,5 +252,17 @@ describe("safe error logging", () => {
     const plain = describeError(new Error("Failed for Jane Doe"));
     expect(plain).not.toContain("Jane");
     expect(plain.startsWith("Error")).toBe(true);
+  });
+});
+
+describe("structured logging", () => {
+  it("writes one parseable JSON object per line with the fields given", () => {
+    const lines: string[] = [];
+    logLine("info", "tick", { sent: 2, purged: 0 }, (l) => lines.push(l));
+    expect(lines).toHaveLength(1);
+    const o = JSON.parse(lines[0]);
+    expect(o).toMatchObject({ level: "info", event: "tick", sent: 2, purged: 0 });
+    expect(new Date(o.time).getTime()).not.toBeNaN();
+    expect(lines[0]).not.toContain("\n");
   });
 });

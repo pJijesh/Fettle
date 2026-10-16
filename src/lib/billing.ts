@@ -1,3 +1,4 @@
+import { normaliseVatNumber } from "./vat";
 import crypto from "node:crypto";
 import type { SessionUser } from "./accounts";
 import type { Db } from "./db";
@@ -16,6 +17,8 @@ export interface BillingSettings {
   creditPrefix: string;
   /** VAT rate in basis points (2000 = 20%). Zero for a practice that is not VAT registered. */
   vatRateBp: number;
+  /** UK VAT registration number, "GB" and digits. Required whenever the VAT rate is above zero. */
+  vatNumber: string;
   billingDetails: string;
   paymentTermsDays: number;
 }
@@ -66,6 +69,8 @@ export interface InvoiceView extends InvoiceSummary {
   creditedByNumber: string | null;
   claimRef: string;
   note: string;
+  /** The VAT number printed on this invoice. Empty when no VAT was charged. */
+  vatNumber: string;
   subtotalPence: number;
   vatPence: number;
   createdBy: string;
@@ -150,7 +155,7 @@ export class Billing {
   async getSettings(clinicId: string): Promise<BillingSettings> {
     return this.db.scope(clinicId, async () => {
       const r = await this.db.get<Row>(
-        "SELECT invoice_prefix, credit_prefix, vat_rate_bp, billing_details, payment_terms_days FROM clinics WHERE id = ?",
+        "SELECT invoice_prefix, credit_prefix, vat_rate_bp, vat_number, billing_details, payment_terms_days FROM clinics WHERE id = ?",
         [clinicId],
       );
       if (!r) throw new DomainError("not_found", "Clinic not found");
@@ -158,6 +163,7 @@ export class Billing {
         invoicePrefix: r.invoice_prefix as string,
         creditPrefix: r.credit_prefix as string,
         vatRateBp: Number(r.vat_rate_bp),
+        vatNumber: r.vat_number as string,
         billingDetails: r.billing_details as string,
         paymentTermsDays: Number(r.payment_terms_days),
       };
@@ -173,13 +179,16 @@ export class Billing {
     if (!PREFIX.test(cn)) issues.push(issue("creditPrefix", "Use up to 8 letters, numbers or hyphens"));
     if (PREFIX.test(inv) && inv === cn) issues.push(issue("creditPrefix", "Credit notes need a different prefix from invoices"));
     if (!Number.isInteger(input.vatRateBp) || input.vatRateBp < 0 || input.vatRateBp > 10_000) issues.push(issue("vatRate", "Enter a VAT rate from 0 to 100"));
+    const vatNumber = input.vatNumber.trim() ? normaliseVatNumber(input.vatNumber) : "";
+    if (vatNumber === null) issues.push(issue("vatNumber", "That does not look like a UK VAT number. It is nine digits, for example GB 980 7806 84"));
+    else if (!vatNumber && input.vatRateBp > 0) issues.push(issue("vatNumber", "Enter your VAT registration number. An invoice that charges VAT must show it"));
     if (!Number.isInteger(input.paymentTermsDays) || input.paymentTermsDays < 0 || input.paymentTermsDays > 365) issues.push(issue("paymentTermsDays", "Enter 0 to 365 days"));
     if (input.billingDetails.length > 1000) issues.push(issue("billingDetails", "Keep the details under 1,000 characters"));
     if (issues.length) throw new DomainError("validation", "Check the billing settings", issues);
     await this.db.scope(actor.clinicId, async () => {
       await this.db.run(
-        "UPDATE clinics SET invoice_prefix = ?, credit_prefix = ?, vat_rate_bp = ?, billing_details = ?, payment_terms_days = ? WHERE id = ?",
-        [inv, cn, input.vatRateBp, input.billingDetails.trim(), input.paymentTermsDays, actor.clinicId],
+        "UPDATE clinics SET invoice_prefix = ?, credit_prefix = ?, vat_rate_bp = ?, vat_number = ?, billing_details = ?, payment_terms_days = ? WHERE id = ?",
+        [inv, cn, input.vatRateBp, vatNumber ?? "", input.billingDetails.trim(), input.paymentTermsDays, actor.clinicId],
       );
       await this.scheduling.audit(actor.clinicId, actor.email, "billing.settings_changed", "clinic", { vatRateBp: input.vatRateBp });
     });
@@ -237,6 +246,10 @@ export class Billing {
         }
       }
       const settings = await this.getSettings(actor.clinicId);
+      if (settings.vatRateBp > 0 && !settings.vatNumber) {
+        throw new DomainError("invalid_state", "VAT is switched on but no VAT registration number is saved. Add it in Settings, under Billing, then issue the invoice.");
+      }
+      const vatNumber = settings.vatRateBp > 0 ? settings.vatNumber : "";
 
       const lines = input.lines.map((l, i) => {
         const net = l.quantity * l.unitPence;
@@ -250,10 +263,10 @@ export class Billing {
       const number = await this.nextNumber(actor.clinicId, "invoice");
       await this.db.run(
         `INSERT INTO invoices (id, clinic_id, number, kind, patient_id, appointment_id, credits_invoice_id, payer_type, payer_name, claim_ref, note,
-           issued_at, due_at, subtotal_pence, vat_pence, total_pence, created_by)
-         VALUES (?, ?, ?, 'invoice', ?, ?, NULL, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+           issued_at, due_at, subtotal_pence, vat_pence, total_pence, created_by, vat_number)
+         VALUES (?, ?, ?, 'invoice', ?, ?, NULL, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
         [id, actor.clinicId, number, input.patientId, input.appointmentId ?? null, payerType, payerName, (input.claimRef ?? "").trim(), (input.note ?? "").trim(),
-          issued.toISOString(), due.toISOString(), subtotal, vat, subtotal + vat, actor.email],
+          issued.toISOString(), due.toISOString(), subtotal, vat, subtotal + vat, actor.email, vatNumber],
       );
       await this.insertLines(actor.clinicId, id, lines);
       await this.scheduling.audit(actor.clinicId, actor.email, "invoice.issued", "invoice", { invoiceId: id, number, totalPence: subtotal + vat });
@@ -407,6 +420,7 @@ export class Billing {
         creditedByNumber: credited?.number ?? null,
         claimRef: r.claim_ref as string,
         note: r.note as string,
+        vatNumber: (r.vat_number as string) ?? "",
         subtotalPence: Number(r.subtotal_pence),
         vatPence: Number(r.vat_pence),
         createdBy: r.created_by as string,
@@ -552,10 +566,10 @@ export class Billing {
       const now = this.now().toISOString();
       await this.db.run(
         `INSERT INTO invoices (id, clinic_id, number, kind, patient_id, appointment_id, credits_invoice_id, payer_type, payer_name, claim_ref, note,
-           issued_at, due_at, subtotal_pence, vat_pence, total_pence, created_by)
-         VALUES (?, ?, ?, 'credit_note', ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+           issued_at, due_at, subtotal_pence, vat_pence, total_pence, created_by, vat_number)
+         VALUES (?, ?, ?, 'credit_note', ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
         [id, actor.clinicId, number, inv.patientId, inv.appointmentId, invoiceId, inv.payerType, inv.payerName, inv.claimRef, reason.trim(), now, now,
-          -inv.subtotalPence, -inv.vatPence, -inv.totalPence, actor.email],
+          -inv.subtotalPence, -inv.vatPence, -inv.totalPence, actor.email, inv.vatNumber],
       );
       await this.insertLines(
         actor.clinicId,

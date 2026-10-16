@@ -1,4 +1,5 @@
 import type { Metadata } from "next";
+import { headers } from "next/headers";
 import "./globals.css";
 
 export const metadata: Metadata = {
@@ -7,7 +8,10 @@ export const metadata: Metadata = {
   robots: { index: false, follow: false },
 };
 
-export default function RootLayout({ children }: { children: React.ReactNode }) {
+// Reading the request headers makes every page render per request, which is what lets Next put this request's
+// nonce on its scripts (see src/proxy.ts).
+export default async function RootLayout({ children }: { children: React.ReactNode }) {
+  await headers();
   return (
     <html lang="en-GB">
       <body>{children}</body>

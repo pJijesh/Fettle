@@ -203,7 +203,7 @@ export function createPool(url: string, max = 10): pg.Pool {
   // An idle connection can be dropped by the server (restart, failover). Without a listener that would crash the
   // process; the pool discards the dead connection and opens a new one on the next request.
   pool.on("error", (err) => {
-    console.error("Idle database connection lost:", err.message);
+    console.error(JSON.stringify({ time: new Date().toISOString(), level: "error", event: "db.idle_connection_lost", error: (err as { code?: string }).code ?? err.name }));
   });
   return pool;
 }

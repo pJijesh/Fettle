@@ -13,6 +13,20 @@ export function describeError(err: unknown): string {
   return [e.name ?? "Error", ...frames].join(" | ");
 }
 
+type Fields = Record<string, string | number | boolean | null | undefined>;
+
+/**
+ * One JSON object per line, which every log collector can parse. Only the fields given are written; callers pass
+ * counts, codes and identifiers, never names, notes or message text.
+ */
+export function logLine(level: "info" | "warn" | "error", event: string, fields: Fields = {}, out: (line: string) => void = level === "error" ? console.error : console.log): void {
+  out(JSON.stringify({ time: new Date().toISOString(), level, event, ...fields }));
+}
+
 export function logError(where: string, err: unknown): void {
-  console.error(`[${where}] ${describeError(err)}`);
+  logLine("error", where, { error: describeError(err) });
+}
+
+export function logInfo(event: string, fields: Fields = {}): void {
+  logLine("info", event, fields);
 }
