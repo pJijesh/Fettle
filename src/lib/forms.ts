@@ -26,7 +26,11 @@ export interface FormDef {
   mandatory: boolean;
   active: boolean;
   version: number;
+  /** "any" is sent with every appointment; otherwise only with appointments of that discipline. */
+  discipline: FormDiscipline;
 }
+
+export type FormDiscipline = "any" | "physio" | "ayurveda";
 
 export interface FormRequestView {
   id: string;
@@ -53,6 +57,38 @@ export const DEFAULT_INTAKE_FIELDS: FormField[] = [
   { id: "unwell", label: "Have you been generally unwell, with fever or unexplained weight loss?", type: "yesno", required: true },
   { id: "consent", label: "I agree to my information being used for my care, as set out in the clinic's privacy notice.", type: "agree", required: true },
 ];
+
+/**
+ * A starting intake form for Ayurveda, written in plain language for the patient. Like the physiotherapy one it is a
+ * template that has not been reviewed by a qualified practitioner. It asks nothing a practitioner could not ask in
+ * the room, and the practitioner's own record (not this form) is what gets approved.
+ */
+export const DEFAULT_AYURVEDA_INTAKE_FIELDS: FormField[] = [
+  { id: "reason", label: "What would you like help with?", type: "longtext", required: true },
+  { id: "duration", label: "How long have you had this?", type: "text", required: false },
+  { id: "doctor", label: "Are you under a doctor's or hospital's care for this?", type: "yesno", required: true },
+  { id: "history", label: "Other health conditions, operations or past illnesses", type: "longtext", required: false },
+  { id: "medication", label: "Medicines you take, including any prescribed by your doctor", type: "longtext", required: true, help: "Write 'none' if you take none." },
+  { id: "supplements", label: "Herbal products, supplements or other remedies you take", type: "longtext", required: true, help: "Include anything bought without a prescription. Write 'none' if you take none." },
+  { id: "allergies", label: "Allergies, including to oils, foods or herbs", type: "text", required: true, help: "Write 'none known' if you have none." },
+  { id: "pregnancy", label: "Are you pregnant, breastfeeding or trying to conceive?", type: "choice", required: true, options: ["No", "Pregnant", "Breastfeeding", "Trying to conceive", "Not applicable", "Prefer to tell the practitioner"] },
+  { id: "digestion", label: "How is your digestion and appetite?", type: "choice", required: false, options: ["Regular", "Irregular appetite", "Gas or bloating", "Acidity or burning", "Slow or heavy", "Constipation", "Loose stools"] },
+  { id: "sleep", label: "How do you sleep?", type: "choice", required: false, options: ["Sound", "Light or broken", "Trouble falling asleep", "Wake early", "Sleep a lot and still tired"] },
+  { id: "energy", label: "Your energy during the day (0 = very low, 10 = very good)", type: "scale", required: false },
+  { id: "stress", label: "How stressed have you felt recently? (0 = not at all, 10 = extremely)", type: "scale", required: false },
+  { id: "diet", label: "Your usual diet", type: "choice", required: false, options: ["Vegetarian", "Vegan", "Eggs and fish", "Mixed", "Other"] },
+  { id: "previous", label: "Have you had Ayurvedic treatment before?", type: "yesno", required: false },
+  { id: "unwell", label: "Have you been generally unwell, with fever, unexplained weight loss or severe pain?", type: "yesno", required: true },
+  { id: "consent", label: "I agree to my information being used for my care, as set out in the clinic's privacy notice.", type: "agree", required: true },
+];
+
+/** Adds the starting intake form for a discipline. Used when a clinic is set up and when it adds a discipline. */
+export async function addStarterForm(db: Db, clinicId: string, discipline: "physio" | "ayurveda", ts: string): Promise<void> {
+  const [name, fields] = discipline === "ayurveda" ? ["New patient intake (Ayurveda)", DEFAULT_AYURVEDA_INTAKE_FIELDS] : ["New patient intake", DEFAULT_INTAKE_FIELDS];
+  await db.run("INSERT INTO forms (id, clinic_id, name, kind, fields_json, mandatory, active, version, created_at, discipline) VALUES (?, ?, ?, 'intake', ?, 1, 1, 1, ?, ?)", [
+    crypto.randomUUID(), clinicId, name, JSON.stringify(fields), ts, discipline,
+  ]);
+}
 
 function parseFields(json: string): FormField[] {
   return FormFields.parse(JSON.parse(json));
@@ -81,6 +117,7 @@ export class Forms {
       mandatory: !!r.mandatory,
       active: !!r.active,
       version: Number(r.version),
+      discipline: ((r.discipline as string) ?? "any") as FormDiscipline,
     };
   }
 
@@ -97,7 +134,7 @@ export class Forms {
   }
 
   /** Creates a form, or saves a new version of an existing one. Past requests keep the version they were sent with. */
-  async save(clinicId: string, by: string, input: { id?: string; name: string; kind: "intake" | "consent"; fieldsJson: string; mandatory: boolean; active: boolean }): Promise<string> {
+  async save(clinicId: string, by: string, input: { id?: string; name: string; kind: "intake" | "consent"; fieldsJson: string; mandatory: boolean; active: boolean; discipline?: FormDiscipline }): Promise<string> {
     let fields: FormField[];
     try {
       const parsed = FormFields.safeParse(JSON.parse(input.fieldsJson));
@@ -121,31 +158,35 @@ export class Forms {
         throw new DomainError("validation", "Check the form's questions", [{ path: "fields", message: `"${f.label}" needs options to choose from` }]);
       }
     }
+    if (input.discipline !== undefined && !["any", "physio", "ayurveda"].includes(input.discipline)) {
+      throw new DomainError("validation", "Choose who the form is for", [{ path: "discipline", message: "Choose everyone, physiotherapy or Ayurveda" }]);
+    }
     if (!input.name.trim()) throw new DomainError("validation", "Enter a name", [{ path: "name", message: "Enter a name" }]);
     return this.db.scope(clinicId, async () => {
       if (input.id) {
         const cur = await this.get(clinicId, input.id);
         await this.db.run(
-          "UPDATE forms SET name = ?, kind = ?, fields_json = ?, mandatory = ?, active = ?, version = ? WHERE id = ? AND clinic_id = ?",
-          [input.name.trim(), input.kind, JSON.stringify(fields), input.mandatory ? 1 : 0, input.active ? 1 : 0, cur.version + 1, input.id, clinicId],
+          "UPDATE forms SET name = ?, kind = ?, fields_json = ?, mandatory = ?, active = ?, version = ?, discipline = ? WHERE id = ? AND clinic_id = ?",
+          [input.name.trim(), input.kind, JSON.stringify(fields), input.mandatory ? 1 : 0, input.active ? 1 : 0, cur.version + 1, input.discipline ?? cur.discipline, input.id, clinicId],
         );
         await this.audit(clinicId, by, "form.updated", { id: input.id, version: cur.version + 1 });
         return input.id;
       }
       const id = crypto.randomUUID();
       await this.db.run(
-        "INSERT INTO forms (id, clinic_id, name, kind, fields_json, mandatory, active, version, created_at) VALUES (?, ?, ?, ?, ?, ?, ?, 1, ?)",
-        [id, clinicId, input.name.trim(), input.kind, JSON.stringify(fields), input.mandatory ? 1 : 0, input.active ? 1 : 0, this.ts()],
+        "INSERT INTO forms (id, clinic_id, name, kind, fields_json, mandatory, active, version, created_at, discipline) VALUES (?, ?, ?, ?, ?, ?, ?, 1, ?, ?)",
+        [id, clinicId, input.name.trim(), input.kind, JSON.stringify(fields), input.mandatory ? 1 : 0, input.active ? 1 : 0, this.ts(), input.discipline ?? "any"],
       );
       await this.audit(clinicId, by, "form.created", { id });
       return id;
     });
   }
 
-  /** Attaches every active form to a new appointment. Used by the booking hook. */
+  /** Attaches every active form that applies to the appointment's discipline. Used by the booking hook. */
   async requestForAppointment(a: AppointmentView, clinicId: string): Promise<FormRequestView[]> {
     return this.db.scope(clinicId, async () => {
-      const forms = (await this.list(clinicId)).filter((f) => f.active);
+      const type = await this.db.get<{ discipline: string }>("SELECT discipline FROM appointment_types WHERE id = ? AND clinic_id = ?", [a.typeId, clinicId]);
+      const forms = (await this.list(clinicId)).filter((f) => f.active && (f.discipline === "any" || f.discipline === (type?.discipline ?? "physio")));
       const out: string[] = [];
       for (const f of forms) {
         // Returning patients do not redo a mandatory form they have already completed on this version.

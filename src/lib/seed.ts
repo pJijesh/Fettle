@@ -1,6 +1,6 @@
 import crypto from "node:crypto";
 import type { Db } from "./db";
-import { DEFAULT_INTAKE_FIELDS } from "./forms";
+import { addStarterForm } from "./forms";
 
 /**
  * Starting content for a new clinic, so the diary works on day one. Everything here is editable.
@@ -29,9 +29,9 @@ export function seedClinic(db: Db, clinicId: string, ownerId: string, now: Date 
         ]);
       }
     }
-    await db.run("INSERT INTO forms (id, clinic_id, name, kind, fields_json, mandatory, active, version, created_at) VALUES (?, ?, 'New patient intake', 'intake', ?, 1, 1, 1, ?)", [
-      crypto.randomUUID(), clinicId, JSON.stringify(DEFAULT_INTAKE_FIELDS), ts,
-    ]);
+    for (const d of ["physio", "ayurveda"] as const) {
+      if (disciplines === "both" || disciplines === d) await addStarterForm(db, clinicId, d, ts);
+    }
     for (let d = 1; d <= 5; d++) {
       await db.run("INSERT INTO clinician_hours (id, clinic_id, user_id, weekday, start_min, end_min) VALUES (?, ?, ?, ?, 540, 1020)", [crypto.randomUUID(), clinicId, ownerId, d]);
     }

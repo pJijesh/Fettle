@@ -36,7 +36,7 @@ npm install
 cp .env.example .env.local     # set LINK_SECRET (and APP_BASE_URL outside localhost)
 npm run db:up                  # starts Postgres in Docker and applies db/migrations
 npm run dev                    # http://localhost:3000, goes to /setup on first run
-npm test                       # 198 tests, against a real Postgres (see below)
+npm test                       # 202 tests, against a real Postgres (see below)
 npm run typecheck
 npm run build && npm start
 ```
@@ -73,12 +73,12 @@ Tests need a Postgres superuser connection (`TEST_DATABASE_URL`, default `postgr
 | Audio capture and transcription | Not built. Paste or type the transcript |
 | Exercise catalogue, intake form, default hours | Starter content. A clinical lead should review before use |
 | **Billing** | Records what was charged and paid; it does not take money. **No card payments** (a Stripe account is needed) and **no insurer claim submission** (insurer name and claim reference are recorded on the invoice, nothing is sent). One VAT rate for the whole invoice; no per-item exemptions. Fettle does not send refunds: you pay the person back yourself, then reverse the payment with the reason. The VAT number is checked for format only, not against HMRC. Whether the invoice wording meets your accountant's and any insurer's requirements has not been checked |
-| **Ayurveda content** | **Starter library not reviewed by a qualified Ayurvedic practitioner** (the app says so where it is used). It holds therapies, diet and daily routine only: **no herbs and no doses**, which the practitioner writes and owns. Intensive cleansing procedures are left out. Ayurveda is not a regulated profession in the UK; the clinic is responsible for who practises, for the legal status of any herbal product supplied, and for herb-drug interaction checks. No Ayurveda-specific intake form yet; the physio intake form is reused. Write-back to Cliniko sends the note as text |
+| **Ayurveda content** | **Starter library not reviewed by a qualified Ayurvedic practitioner** (the app says so where it is used). It holds therapies, diet and daily routine only: **no herbs and no doses**, which the practitioner writes and owns. Intensive cleansing procedures are left out. Ayurveda is not a regulated profession in the UK; the clinic is responsible for who practises, for the legal status of any herbal product supplied, and for herb-drug interaction checks. The Ayurveda starter intake form (medicines, herbal products, allergies, pregnancy, digestion, sleep) is likewise unreviewed. Forms can be limited to one discipline, so Ayurveda patients are not sent the physiotherapy pain and numbness questions. Write-back to Cliniko sends the note as text |
 | Notes templates, mobile apps | Later phases (see [docs/PRD.md](docs/PRD.md)) |
 
 ## Checked
 
-- 198 automated tests, each in its own fresh Postgres database under the same row-level security as production: domain rules, accounts and second factor, clock-change days, overlap protection (service and database), truly concurrent booking, clinic separation (database policies and service calls), online booking, manage links, forms, portal codes, waiting list (first accept wins, expiry, matching), outbox idempotency and retries, reminders, calendar feed, import with dry run, column mapping, Excel and undo.
+- 202 automated tests, each in its own fresh Postgres database under the same row-level security as production: domain rules, accounts and second factor, clock-change days, overlap protection (service and database), truly concurrent booking, clinic separation (database policies and service calls), online booking, manage links, forms, portal codes, waiting list (first accept wins, expiry, matching), outbox idempotency and retries, reminders, calendar feed, import with dry run, column mapping, Excel and undo.
 - Browser walkthrough of the data-rights screens (download, anonymise with and without override, retention page), the VAT number rules and invoice, and every page checked for Content-Security-Policy violations, plus a check that an injected script and inline handler are blocked. Backup and restore-verify run with and without encryption, and fail clearly on a wrong passphrase, a corrupted file and a missing migration.
 - Browser walkthroughs of billing (invoice, part payment, overpayment refused, reversal, credit note) and Ayurveda (consent, refused when incomplete, approval, patient plan on a phone, check-in).
 - Browser walkthrough of every Phase 1 screen: first-run set-up and two-step sign-in, booking and portal as a patient on a phone, drag-and-drop on the calendar, role restrictions (reception cannot reach settings, consultations, import or the outbox), lock-out.

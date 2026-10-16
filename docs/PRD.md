@@ -93,7 +93,7 @@ These are targets for a pilot, not claims. No pilot has run yet.
 | A5 | No AI drafting and no transcript. The practitioner writes the record | Built (by design) |
 | A6 | Approval requires qualification, safety screen, medicines and allergies; herbs additionally need instructions, duration and cautions | Built |
 | A7 | **No herbs and no doses in the starter library.** The practitioner enters and owns them | Built (by design) |
-| A8 | Ayurveda-specific intake form | Not built |
+| A8 | Ayurveda-specific intake form, and forms that can be limited to one discipline | Built (starter content unreviewed) |
 | A9 | Review of the starter library by a qualified Ayurvedic practitioner | Needs others |
 
 Ayurveda is not a regulated profession in the UK. The product records who practised and what they wrote; the clinic is responsible for who practises, the legal status of any herbal product supplied and herb-drug interaction checks. The app says so where it is used.
@@ -227,7 +227,7 @@ Access to billing is owner and reception only. Clinicians are denied.
 | Money | Whole pence everywhere |
 | Drafting | Provider interface: a labelled mock by default; Anthropic available |
 
-Migrations: 0001 schema, 0002 hardening, 0003 billing, 0004 Ayurveda, 0005 records and VAT number.
+Migrations: 0001 schema, 0002 hardening, 0003 billing, 0004 Ayurveda, 0005 records and VAT number, 0006 form discipline.
 
 Repository layout is in the README.
 
@@ -241,7 +241,7 @@ Consultation workflow · diary and front desk · row-level security on Postgres 
 
 ### Gap fixes (merged, PR #5)
 
-Patient export, anonymisation and retention (P3 to P5) · Content-Security-Policy, HSTS, Permissions-Policy · structured logs, backup and restore-verify scripts, runbook, `npm audit` in CI · VAT registration number on invoices and refund wording. 198 tests pass.
+Patient export, anonymisation and retention (P3 to P5) · Content-Security-Policy, HSTS, Permissions-Policy · structured logs, backup and restore-verify scripts, runbook, `npm audit` in CI · VAT registration number on invoices and refund wording. 202 tests pass.
 
 ### Next, in order
 

@@ -1,6 +1,7 @@
 import crypto from "node:crypto";
 import { isOverlap, type Db } from "./db";
 import { DomainError } from "./errors";
+import { addStarterForm } from "./forms";
 import { addDays, dayBounds, isDate, utcToZoned, weekdayOf, zonedToUtc } from "./tz";
 
 export type ApptStatus = "booked" | "arrived" | "completed" | "cancelled" | "no_show";
@@ -409,6 +410,14 @@ export class Scheduling {
       for (const d of (["physio", "ayurveda"] as const).filter((x) => value === "both" || value === x)) {
         const any = await this.db.get("SELECT 1 FROM appointment_types WHERE clinic_id = ? AND discipline = ?", [clinicId, d]);
         if (!any) await this.addStarterTypes(clinicId, d);
+      }
+      if (value !== "physio") {
+        const has = await this.db.get("SELECT 1 FROM forms WHERE clinic_id = ? AND discipline = 'ayurveda'", [clinicId]);
+        if (!has) {
+          // The physiotherapy starter form asks about pain and numbness, so it must stop going to Ayurveda patients.
+          await this.db.run("UPDATE forms SET discipline = 'physio' WHERE clinic_id = ? AND discipline = 'any' AND name = 'New patient intake'", [clinicId]);
+          await addStarterForm(this.db, clinicId, "ayurveda", this.ts());
+        }
       }
       await this.audit(clinicId, by, "clinic.disciplines_changed", "clinic", { disciplines: value });
     });
