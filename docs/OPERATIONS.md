@@ -15,6 +15,7 @@ For whoever runs Fettle in production. It covers configuration, backups, restore
 | `SMTP_HOST`, `SMTP_PORT`, `SMTP_SECURE`, `SMTP_USER`, `SMTP_PASS`, `SMTP_FROM`, `SMTP_REPLY_TO` | Email through any SMTP service. See "Email and text delivery" |
 | `TWILIO_ACCOUNT_SID`, `TWILIO_AUTH_TOKEN`, `TWILIO_FROM` | Text messages through Twilio. All three or none |
 | `STRIPE_SECRET_KEY`, `STRIPE_WEBHOOK_SECRET` | Card payment links and their webhook. See "Card payments" |
+| `SPEECH_PROVIDER`, `AZURE_SPEECH_ENDPOINT`, `AZURE_SPEECH_KEY`, `AZURE_SPEECH_LOCALE` | Audio capture. Unset means it is off. See "Audio capture" |
 | `AI_PROVIDER`, `ANTHROPIC_API_KEY` | Physiotherapy drafting. The default is a labelled mock |
 
 Serve the app only over HTTPS, behind a proxy that sets `X-Forwarded-Proto: https`. The app then sends `Strict-Transport-Security` and `upgrade-insecure-requests`. Without that header it assumes plain HTTP and sends neither, so the browser is never told to insist on HTTPS.
@@ -53,6 +54,16 @@ How it behaves:
 - Payment links last 24 hours. Making a second link for the same balance within ten minutes returns the same link.
 - Links are for the patient's balance on a patient invoice, at least £0.30; insurer invoices are excluded.
 - Stripe's own fees are not recorded in Fettle.
+
+## Audio capture
+
+Off by default. With `SPEECH_PROVIDER=azure` (plus `AZURE_SPEECH_ENDPOINT`, the address of your own Azure AI Speech resource, and `AZURE_SPEECH_KEY`), a physiotherapy consultation shows "Record the consultation" once consent is recorded. `SPEECH_PROVIDER=mock` is a demo that invents text; never use it with real patients. Locale defaults to `en-GB`.
+
+- **Where the audio goes.** The browser sends the recording to Fettle, which passes it straight to the speech service in memory and drops it. Fettle writes no audio to disk or the database, and the audit trail holds only sizes, the provider name and that the recording was confirmed, never words. Only the text is kept, and transcripts are cleared after approval like any other (`TRANSCRIPT_RETENTION_DAYS`).
+- **Sub-processor.** The speech provider processes the audio, which is special-category data. Before real patients: sign its data-processing terms, pick a region that suits your data-location commitments (create the Speech resource in a UK region if the service supports fast transcription there; check the provider's region table, because this was not confirmed), check how long it retains audio and switch off any training or logging use, and list it in the privacy notice and DPIA.
+- **Consent.** Recording needs the usual consent recorded first, then a separate tick that the patient agreed to the audio recording. Withdrawing consent while a recording is being processed discards the text.
+- **Browsers.** Recording needs HTTPS (or localhost) and the microphone allowed for the site; the page's `Permissions-Policy` allows the microphone for this site only. Where recording is not possible the screen offers uploading an audio file. Recordings up to 100 MB are accepted (hours of speech), and a long one can take a minute or more to process, so your proxy's timeout should be at least five minutes for `/api/consults/*/audio`.
+- **Accuracy.** Speakers are separated for two people and labelled Physio (first voice) and Patient. This is a guess: the physio checks the text and can swap the labels before drafting. Recording is lost if the browser closes mid-consultation; nothing is saved until Stop.
 
 ## Deploying and upgrading
 
@@ -134,4 +145,5 @@ Alert on: `level":"error"`, `/api/health` failing, a `tick` line with `failed` o
 - `scripts/backup.sh` and `scripts/restore-verify.sh`: run against a local Postgres 16 with and without encryption. A wrong passphrase, a corrupted file and a backup missing a migration each fail with a clear message.
 - Email and text providers: tested against a local SMTP server and a local stand-in for Twilio's API (delivery, wrong password, rejected recipient, no encryption offered, unreachable service, retries). Never against a real provider.
 - Card payments: tested against a local stand-in for Stripe's API (link creation, signature checking, once-only recording, unapplied payments, wrong clinic). A local run recorded a signed test notification once and ignored a repeat and a bad signature. Never against Stripe itself.
+- Audio capture: tested against a local stand-in for Azure's speech API (request shape, speaker renumbering, failures reduced to a status code) and in a browser with a fake microphone (record, stop, text added, swap labels, a 30 MB upload, wrong type, missing confirmation, signed out). Never against the real service or a real microphone.
 - Not yet tested: a managed Postgres, a scheduled job, off-site copy, restore onto a different server, restore timing at real data sizes.

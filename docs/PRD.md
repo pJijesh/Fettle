@@ -78,7 +78,7 @@ These are targets for a pilot, not claims. No pilot has run yet.
 | C5 | Signed, expiring, revocable patient link showing the plan in plain language | Built |
 | C6 | Two-tap check-in from the link (how the pain or symptoms are, and whether the plan is being followed). Worse-than-before surfaces on the calendar | Built |
 | C7 | Optional write-back of the approved note to Cliniko. Idempotent; an uncertain outcome stops for a person to check | Built (unverified against the live API) |
-| C8 | Audio capture and transcription inside the app | Not built |
+| C8 | Audio capture and transcription inside the app: record in the browser or upload a file, after consent and a recording confirmation; speech to text with two speakers; audio never stored, only text; transcript checked by the physio before drafting | Built, tested against a stand-in for the speech service only. Needs a Speech resource, a data-processing agreement and a live test |
 | C9 | Note templates beyond the default structure: clinic-written prompts for rows and standard wording, added by the physio on the review screen. Never holds a finding; fills only empty parts | Built. The three example templates need clinical review |
 | C10 | Live AI drafting using the Anthropic provider | Built, never run live |
 
@@ -241,11 +241,11 @@ Consultation workflow · diary and front desk · row-level security on Postgres 
 
 ### Gap fixes (merged, PR #5)
 
-Patient export, anonymisation and retention (P3 to P5) · Content-Security-Policy, HSTS, Permissions-Policy · structured logs, backup and restore-verify scripts, runbook, `npm audit` in CI · VAT registration number on invoices and refund wording. 234 tests pass.
+Patient export, anonymisation and retention (P3 to P5) · Content-Security-Policy, HSTS, Permissions-Policy · structured logs, backup and restore-verify scripts, runbook, `npm audit` in CI · VAT registration number on invoices and refund wording. 249 tests pass.
 
 ### Built since (merged)
 
-Email and text through real providers (tested against stand-ins) · Ayurveda intake form · card payments through Stripe (tested against a stand-in) · note templates. 234 tests pass.
+Email and text through real providers (tested against stand-ins) · Ayurveda intake form · card payments through Stripe (tested against a stand-in) · note templates · audio capture. 249 tests pass.
 
 ### Next, in order
 
@@ -259,7 +259,7 @@ Email and text through real providers (tested against stand-ins) · Ayurveda int
 | 6 | Closed pilot with one or two clinics, then a load test | Steps 1 to 5 |
 | 7 | DPIA, DCB0129, DTAC, MHRA analysis, penetration test, manual accessibility review | A pilot to learn from |
 | 8 | Insurer claim submission | Insurer requirements; demand from the pilot |
-| 9 | Audio capture, mobile apps | Pilot feedback |
+| 9 | Mobile apps | Pilot feedback |
 
 ### Gate to real patient data
 

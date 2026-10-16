@@ -37,7 +37,7 @@ npm install
 cp .env.example .env.local     # set LINK_SECRET (and APP_BASE_URL outside localhost)
 npm run db:up                  # starts Postgres in Docker and applies db/migrations
 npm run dev                    # http://localhost:3000, goes to /setup on first run
-npm test                       # 234 tests, against a real Postgres (see below)
+npm test                       # 249 tests, against a real Postgres (see below)
 npm run typecheck
 npm run build && npm start
 ```
@@ -71,15 +71,15 @@ Tests need a Postgres superuser connection (`TEST_DATABASE_URL`, default `postgr
 | Drafting | **Mock provider by default** (a keyword matcher, labelled as not clinical). `AI_PROVIDER=anthropic` is available but **has not been exercised against the live API** |
 | Cliniko write-back | **Payload unverified against the live API.** Idempotent; an uncertain outcome stops at "needs check" and asks a person |
 | Rate limiting | Shared through Postgres, so it holds across several app instances. Keys are stored hashed |
-| Audio capture and transcription | Not built. Paste or type the transcript |
+| Audio capture and transcription | Built, **off unless `SPEECH_PROVIDER` is set**. Record in the browser (or upload an audio file) after consent and an explicit recording confirmation; the audio is turned into text by Azure AI Speech and **never stored by Fettle**, only the text. **Tested only against a local stand-in for Azure (never the real service)**, and the physio must check the text and who said what before drafting. Typing or pasting still works |
 | Exercise catalogue, intake form, default hours | Starter content. A clinical lead should review before use |
 | **Billing** | Records what was charged and paid; it does not take money. **Card payments through Stripe are built and tested only against a local stand-in for Stripe (never against Stripe itself)**: an invoice page makes a payment link for the balance, the patient pays on Stripe's page, and a signed webhook records the payment once. Refunds are not automatic: refund in the Stripe dashboard, then reverse the payment in Fettle. **No insurer claim submission** (insurer name and claim reference are recorded on the invoice, nothing is sent). One VAT rate for the whole invoice; no per-item exemptions. Fettle does not send refunds: you pay the person back yourself, then reverse the payment with the reason. The VAT number is checked for format only, not against HMRC. Whether the invoice wording meets your accountant's and any insurer's requirements has not been checked |
 | **Ayurveda content** | **Starter library not reviewed by a qualified Ayurvedic practitioner** (the app says so where it is used). It holds therapies, diet and daily routine only: **no herbs and no doses**, which the practitioner writes and owns. Intensive cleansing procedures are left out. Ayurveda is not a regulated profession in the UK; the clinic is responsible for who practises, for the legal status of any herbal product supplied, and for herb-drug interaction checks. The Ayurveda starter intake form (medicines, herbal products, allergies, pregnancy, digestion, sleep) is likewise unreviewed. Forms can be limited to one discipline, so Ayurveda patients are not sent the physiotherapy pain and numbness questions. Write-back to Cliniko sends the note as text |
-| Audio capture, mobile apps | Later phases (see [docs/PRD.md](docs/PRD.md)) |
+| Mobile apps | Later phases (see [docs/PRD.md](docs/PRD.md)) |
 
 ## Checked
 
-- 234 automated tests, each in its own fresh Postgres database under the same row-level security as production: domain rules, accounts and second factor, clock-change days, overlap protection (service and database), truly concurrent booking, clinic separation (database policies and service calls), online booking, manage links, forms, portal codes, waiting list (first accept wins, expiry, matching), outbox idempotency and retries, reminders, calendar feed, import with dry run, column mapping, Excel and undo.
+- 249 automated tests, each in its own fresh Postgres database under the same row-level security as production: domain rules, accounts and second factor, clock-change days, overlap protection (service and database), truly concurrent booking, clinic separation (database policies and service calls), online booking, manage links, forms, portal codes, waiting list (first accept wins, expiry, matching), outbox idempotency and retries, reminders, calendar feed, import with dry run, column mapping, Excel and undo.
 - Browser walkthrough of the data-rights screens (download, anonymise with and without override, retention page), the VAT number rules and invoice, and every page checked for Content-Security-Policy violations, plus a check that an injected script and inline handler are blocked. Backup and restore-verify run with and without encryption, and fail clearly on a wrong passphrase, a corrupted file and a missing migration.
 - Browser walkthroughs of billing (invoice, part payment, overpayment refused, reversal, credit note) and Ayurveda (consent, refused when incomplete, approval, patient plan on a phone, check-in).
 - Browser walkthrough of every Phase 1 screen: first-run set-up and two-step sign-in, booking and portal as a patient on a phone, drag-and-drop on the calendar, role restrictions (reception cannot reach settings, consultations, import or the outbox), lock-out.
