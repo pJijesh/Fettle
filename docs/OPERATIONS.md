@@ -65,6 +65,15 @@ Off by default. With `SPEECH_PROVIDER=azure` (plus `AZURE_SPEECH_ENDPOINT`, the 
 - **Browsers.** Recording needs HTTPS (or localhost) and the microphone allowed for the site; the page's `Permissions-Policy` allows the microphone for this site only. Where recording is not possible the screen offers uploading an audio file. Recordings up to 100 MB are accepted (hours of speech), and a long one can take a minute or more to process, so your proxy's timeout should be at least five minutes for `/api/consults/*/audio`.
 - **Accuracy.** Speakers are separated for two people and labelled Physio (first voice) and Patient. This is a guess: the physio checks the text and can swap the labels before drafting. Recording is lost if the browser closes mid-consultation; nothing is saved until Stop.
 
+## AI assistance
+
+Letters, patient summaries, the note second look and code suggestions use the same `AI_PROVIDER`, `ANTHROPIC_API_KEY` and `ANTHROPIC_MODEL` as note drafting. With the default (`mock`) they return labelled placeholder text, never written from the note. With `anthropic`, text from the approved note or the draft note and transcript leaves the app to the model vendor: sign its data-processing terms and confirm where it processes data before real patients, and list it in the privacy notice and DPIA (the same vendor and terms already cover note drafting).
+
+- **What is sent.** The note text (and, for the second look, the numbered transcript) and any instruction the practitioner typed. Never the patient's name, date of birth, address, contact details or the GP's details: the letter heading and sign-off are added in Fettle from the patient record when the letter is shown.
+- **What is kept.** Letters and summaries are stored per consultation (table `documents`) with who drafted and finalised them and a content hash. A finalised document cannot be edited. Withdrawing a summary removes it from the patient's link. Anonymising a patient deletes their documents; the patient export includes them. Second-look and code-suggestion results are not stored; the audit log records only that they happened and counts.
+- **Safeguards.** Nothing is written to a patient or another clinician automatically. An assistant finding with no valid transcript line is dropped. Code suggestions that do not look like ICD-10 codes are dropped, and at most three are shown. If the assistant is unavailable, the plain note checks still run and drafting says so.
+- **Not covered.** Ayurvedic records have no AI. Summaries in languages other than English can be wrong in ways the practitioner cannot see; the screen says to have a fluent speaker check them before finalising.
+
 ## Deploying and upgrading
 
 1. Take a backup (below).
@@ -146,4 +155,5 @@ Alert on: `level":"error"`, `/api/health` failing, a `tick` line with `failed` o
 - Email and text providers: tested against a local SMTP server and a local stand-in for Twilio's API (delivery, wrong password, rejected recipient, no encryption offered, unreachable service, retries). Never against a real provider.
 - Card payments: tested against a local stand-in for Stripe's API (link creation, signature checking, once-only recording, unapplied payments, wrong clinic). A local run recorded a signed test notification once and ignored a repeat and a bad signature. Never against Stripe itself.
 - Audio capture: tested against a local stand-in for Azure's speech API (request shape, speaker renumbering, failures reduced to a status code) and in a browser with a fake microphone (record, stop, text added, swap labels, a 30 MB upload, wrong type, missing confirmation, signed out). Never against the real service or a real microphone.
+- AI assistance: tested with a scripted assistant (what is sent and not sent, approved-only, edit and finalise rules, withdrawal, failure saves nothing, clinic separation, anonymise and export) and in a browser with the demo assistant. The live Anthropic API has not been called for these tasks.
 - Not yet tested: a managed Postgres, a scheduled job, off-site copy, restore onto a different server, restore timing at real data sizes.

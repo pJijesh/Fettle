@@ -80,6 +80,10 @@ These are targets for a pilot, not claims. No pilot has run yet.
 | C7 | Optional write-back of the approved note to Cliniko. Idempotent; an uncertain outcome stops for a person to check | Built (unverified against the live API) |
 | C8 | Audio capture and transcription inside the app: record in the browser or upload a file, after consent and a recording confirmation; speech to text with two speakers; audio never stored, only text; transcript checked by the physio before drafting | Built, tested against a stand-in for the speech service only. Needs a Speech resource, a data-processing agreement and a live test |
 | C9 | Note templates beyond the default structure: clinic-written prompts for rows and standard wording, added by the physio on the review screen. Never holds a finding; fills only empty parts | Built. The three example templates need clinical review |
+| C10 | Letters from the approved note (GP update, referral, discharge): AI draft, practitioner edits and finalises, printed or copied, never sent automatically, no names sent to the model | Built (demo provider by default; live API not exercised) |
+| C11 | Plain-English patient summary at two reading levels and in a chosen language; shown on the patient link only after the practitioner finalises; can be withdrawn | Built. A translation needs a fluent speaker to check it before finalising |
+| C12 | Note check before approval: plain rules plus an AI second reader that must cite transcript lines; advice only | Built |
+| C13 | Diagnosis-code (ICD-10) suggestions from the approved note to help complete an insurance claim | Built as suggestions only; the insurer's own code set and rules are not known until Healthcode supplies them |
 | C10 | Live AI drafting using the Anthropic provider | Built, never run live |
 
 ### 4.2 Ayurveda
@@ -227,7 +231,7 @@ Access to billing is owner and reception only. Clinicians are denied.
 | Money | Whole pence everywhere |
 | Drafting | Provider interface: a labelled mock by default; Anthropic available |
 
-Migrations: 0001 schema, 0002 hardening, 0003 billing, 0004 Ayurveda, 0005 records and VAT number, 0006 form discipline, 0007 card payment ids, 0008 note templates.
+Migrations: 0001 schema, 0002 hardening, 0003 billing, 0004 Ayurveda, 0005 records and VAT number, 0006 form discipline, 0007 card payment ids, 0008 note templates, 0009 documents.
 
 Repository layout is in the README.
 
@@ -241,11 +245,11 @@ Consultation workflow · diary and front desk · row-level security on Postgres 
 
 ### Gap fixes (merged, PR #5)
 
-Patient export, anonymisation and retention (P3 to P5) · Content-Security-Policy, HSTS, Permissions-Policy · structured logs, backup and restore-verify scripts, runbook, `npm audit` in CI · VAT registration number on invoices and refund wording. 249 tests pass.
+Patient export, anonymisation and retention (P3 to P5) · Content-Security-Policy, HSTS, Permissions-Policy · structured logs, backup and restore-verify scripts, runbook, `npm audit` in CI · VAT registration number on invoices and refund wording. 263 tests pass.
 
 ### Built since (merged)
 
-Email and text through real providers (tested against stand-ins) · Ayurveda intake form · card payments through Stripe (tested against a stand-in) · note templates · audio capture. 249 tests pass.
+Email and text through real providers (tested against stand-ins) · Ayurveda intake form · card payments through Stripe (tested against a stand-in) · note templates · audio capture · letters, patient summaries, note check and code suggestions. 263 tests pass.
 
 ### Next, in order
 

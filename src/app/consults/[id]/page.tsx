@@ -22,6 +22,10 @@ import { Header } from "../../Header";
 import { ReviewForm } from "./ReviewForm";
 import { AyurvedaForm } from "./AyurvedaForm";
 import { AudioCapture } from "./AudioCapture";
+import { CodeSuggestions } from "./AssistPanel";
+import { draftLetterAction, draftSummaryAction } from "../../actions/assist";
+import { DOC_LABEL } from "@/lib/documents";
+import { LANGUAGES, LEVEL_LABEL, LETTER_KINDS, LETTER_LABEL, SUMMARY_LEVELS } from "@/lib/assist/tasks";
 import { LIBRARY } from "@/lib/ayurveda/catalogue";
 import { KIND_LABEL, KIND_ORDER } from "@/lib/ayurveda/schemas";
 
@@ -50,6 +54,8 @@ async function ConsultPageBody({ params }: Props, user: SessionUser) {
   const lines = transcriptLines(c.transcript);
   const approved = c.status === "approved";
   const ayu = c.discipline === "ayurveda";
+  const docs = !ayu && c.status === "approved" ? await getPlatform().documents.list(user.clinicId, id) : [];
+  const assistInfo = getPlatform().documents.assistInfo;
   const templates = !ayu && c.status === "drafted" ? await getPlatform().templates.list(user.clinicId, { activeOnly: true }) : [];
   const hasActiveLink = c.links.some((l) => !l.revokedAt && new Date(l.expiresAt) > new Date());
 
@@ -248,6 +254,46 @@ async function ConsultPageBody({ params }: Props, user: SessionUser) {
               <pre className="transcript mono card" style={{ background: "var(--bg)" }}>{await svc.approvedNoteText(id)}</pre>
               <CopyButton text={await svc.approvedNoteText(id)} />
             </section>
+
+            {!ayu ? (
+              <section className="card">
+                <h2>Letters and summaries</h2>
+                <p className="muted">Written by an AI assistant from the approved note, as a draft. You read, edit and finalise each one; nothing reaches a patient or another clinician until you do, and nothing is sent automatically. Names are not sent to the assistant.</p>
+                {assistInfo.isMock ? <div className="banner warn">Demo assistant: it writes placeholder text, not from the note. Never use with real patients.</div> : null}
+                {docs.length ? (
+                  <ul className="plain">
+                    {docs.map((d) => (
+                      <li key={d.id}>
+                        <Link href={`/consults/${id}/documents/${d.id}`}><strong>{DOC_LABEL[d.kind]}</strong>{d.language && d.language !== "English" ? ` (${d.language})` : ""}</Link> · {d.status === "draft" ? "draft" : d.status === "final" ? `finalised ${when(d.finalisedAt!)}` : "withdrawn"}
+                      </li>
+                    ))}
+                  </ul>
+                ) : null}
+                <details>
+                  <summary><strong>Write a letter</strong></summary>
+                  <ActionForm action={draftLetterAction} hidden={{ id }} submitLabel="Write a draft">
+                    <label htmlFor="lk">Kind of letter</label>
+                    <select id="lk" name="kind" defaultValue="gp_update">{LETTER_KINDS.map((k) => <option key={k} value={k}>{LETTER_LABEL[k]}</option>)}</select>
+                    <label htmlFor="li">Anything to include or stress (optional)</label>
+                    <textarea id="li" name="instruction" maxLength={500} placeholder="For example: ask the GP to review the patient's pain medication" />
+                  </ActionForm>
+                </details>
+                <details>
+                  <summary><strong>Write a summary for the patient</strong></summary>
+                  <p className="muted">Shown on the patient&apos;s link once you finalise it. For a language other than English, ask someone who speaks it to check it before you finalise; the assistant can make mistakes.</p>
+                  <ActionForm action={draftSummaryAction} hidden={{ id }} submitLabel="Write a draft">
+                    <label htmlFor="sl">Reading level</label>
+                    <select id="sl" name="level" defaultValue="plain">{SUMMARY_LEVELS.map((k) => <option key={k} value={k}>{LEVEL_LABEL[k]}</option>)}</select>
+                    <label htmlFor="sg">Language</label>
+                    <select id="sg" name="language" defaultValue="English">{LANGUAGES.map((k) => <option key={k} value={k}>{k}</option>)}</select>
+                  </ActionForm>
+                </details>
+                <details>
+                  <summary><strong>Diagnosis codes for an insurance claim</strong></summary>
+                  <CodeSuggestions id={id} isMock={assistInfo.isMock} />
+                </details>
+              </section>
+            ) : null}
 
             <section className="card">
               <h2>Patient check-ins</h2>

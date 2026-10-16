@@ -133,6 +133,8 @@ export interface PatientView {
   approvedAt: string;
   /** Set for an Ayurveda consultation, with `programme` empty. */
   ayurveda: AyurvedaPatientPlan | null;
+  /** A summary the practitioner has read and finalised, or null. */
+  summary: { text: string; language: string } | null;
   programme: {
     title: string;
     intro: string;
@@ -654,12 +656,15 @@ export class Service {
       const approval = await this.approvalRow(link.consult_id);
       const row = await this.db.get<{ practitioner: string; discipline: Discipline }>("SELECT practitioner, discipline FROM consults WHERE id = ?", [link.consult_id]);
       if (!approval || !row) return null;
+      const sum = await this.db.get<{ body: string; language: string | null }>("SELECT body, language FROM documents WHERE consult_id = ? AND kind = 'patient_summary' AND status = 'final' ORDER BY finalised_at DESC LIMIT 1", [link.consult_id]);
+      const summary = sum ? { text: sum.body, language: sum.language ?? "English" } : null;
       if (row.discipline === "ayurveda") {
         const plan = JSON.parse(approval.programme_json) as AyurvedaPlan;
         return {
           linkId: link.id,
           consultId: link.consult_id,
           discipline: "ayurveda" as const,
+          summary: null,
           practitioner: row.practitioner,
           approvedAt: approval.approved_at,
           programme: { title: "", intro: "", reviewInWeeks: null, safetyAdvice: [], items: [] },
@@ -680,6 +685,7 @@ export class Service {
         linkId: link.id,
         consultId: link.consult_id,
         discipline: "physio" as const,
+        summary,
         practitioner: row.practitioner,
         approvedAt: approval.approved_at,
         ayurveda: null,

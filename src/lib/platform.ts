@@ -14,10 +14,13 @@ import { Records } from "./records";
 import { Reports } from "./reports";
 import { Scheduling } from "./scheduling";
 import { NoteTemplates } from "./templates";
+import { Documents } from "./documents";
+import { Assistant } from "./assistant";
+import { createAssist, type AssistProvider } from "./assist";
 import { Waitlist } from "./waitlist";
 
 /** Wires the diary, forms, messaging and waiting list together. One per process. */
-export function createPlatform(db: Db, opts: { now?: () => Date; baseUrl?: () => string; mailer?: Mailer; card?: CardProvider | null } = {}) {
+export function createPlatform(db: Db, opts: { now?: () => Date; baseUrl?: () => string; mailer?: Mailer; card?: CardProvider | null; assist?: AssistProvider } = {}) {
   const now = opts.now ?? (() => new Date());
   const baseUrl = opts.baseUrl ?? (() => (process.env.APP_BASE_URL ?? "http://localhost:3000").replace(/\/$/, ""));
   const mailer = opts.mailer ?? createMailer();
@@ -27,6 +30,9 @@ export function createPlatform(db: Db, opts: { now?: () => Date; baseUrl?: () =>
   const notifier = new Notifier(db, outbox, baseUrl, now);
   const forms = new Forms(db, now);
   const templates = new NoteTemplates(db, now);
+  const assist = opts.assist ?? createAssist();
+  const documents = new Documents(db, assist, now);
+  const assistant = new Assistant(db, assist, now);
   const scheduling = new Scheduling(db, now);
   const waitlist = new Waitlist(db, scheduling, notifier, now);
   const booking = new Booking(db, scheduling, forms, notifier, now);
@@ -104,7 +110,7 @@ export function createPlatform(db: Db, opts: { now?: () => Date; baseUrl?: () =>
     return total;
   }
 
-  return { db, now, accounts, scheduling, forms, templates, booking, waitlist, outbox, notifier, ical, importer, reports, billing, records, mailer, tick, baseUrl };
+  return { db, now, accounts, scheduling, forms, templates, documents, assistant, assist, booking, waitlist, outbox, notifier, ical, importer, reports, billing, records, mailer, tick, baseUrl };
 }
 
 export type Platform = ReturnType<typeof createPlatform>;

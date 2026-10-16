@@ -198,6 +198,9 @@ export class Records {
           draft: ap ? null : { record: parse(k.note_json), plan: parse(k.programme_json) },
           transcript: k.transcript ?? null,
           checkIns,
+          documents: (await this.db.all<Row>("SELECT kind, status, subject, body, language, draft_model, created_by, created_at, finalised_by, finalised_at FROM documents WHERE clinic_id = ? AND consult_id = ? ORDER BY created_at", [c, k.id])).map((d) => ({
+            kind: d.kind, status: d.status, subject: d.subject, body: d.body, language: d.language, draftedBy: d.draft_model, createdBy: d.created_by, createdAt: d.created_at, finalisedBy: d.finalised_by, finalisedAt: d.finalised_at,
+          })),
         });
       }
 
@@ -294,6 +297,8 @@ export class Records {
         [SAFE_PRESENT, now, now, patientId, c],
       );
       await this.db.run("UPDATE consults SET patient_label = 'Anonymised patient', transcript = NULL, pms_patient_id = NULL, updated_at = ? WHERE clinic_id = ? AND patient_id = ?", [now, c, patientId]);
+      // Letters and summaries are copies of the record written for a named person, and a practitioner may have typed that name into them.
+      await this.db.run("DELETE FROM documents WHERE clinic_id = ? AND consult_id IN (SELECT id FROM consults WHERE clinic_id = ? AND patient_id = ?)", [c, c, patientId]);
       await this.db.run(
         "UPDATE patient_links SET revoked_at = COALESCE(revoked_at, ?) WHERE clinic_id = ? AND consult_id IN (SELECT id FROM consults WHERE clinic_id = ? AND patient_id = ?)",
         [now, c, c, patientId],

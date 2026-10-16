@@ -121,3 +121,11 @@ export function CopyButton({ text, label = "Copy note" }: { text: string; label?
     </button>
   );
 }
+
+export function PrintButton({ label = "Print" }: { label?: string }) {
+  return (
+    <button type="button" onClick={() => window.print()}>
+      {label}
+    </button>
+  );
+}

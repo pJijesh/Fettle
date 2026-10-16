@@ -3,6 +3,8 @@
 import { useState, useTransition } from "react";
 import type { NoteDraft, ProgrammeDraft, Side } from "@/lib/schemas";
 import { approveAction, saveDraftsAction } from "../../actions";
+import { checkNoteAction } from "../../actions/assist";
+import type { NoteFinding } from "@/lib/note-check";
 import type { ActionState } from "@/lib/action-util";
 import { Feedback } from "../../Forms";
 import { applyTemplate, type TemplateBody } from "@/lib/template-note";
@@ -64,6 +66,7 @@ export function ReviewForm({
   const [confirming, setConfirming] = useState(false);
   const [tplId, setTplId] = useState(templates[0]?.id ?? "");
   const [tplMsg, setTplMsg] = useState("");
+  const [check, setCheck] = useState<{ findings: NoteFinding[]; message?: string } | null>(null);
 
   const payload = () => JSON.stringify({ note, programme: prog });
   const patchNote = (p: Partial<NoteDraft>) => setNote((n) => ({ ...n, ...p }));
@@ -77,6 +80,17 @@ export function ReviewForm({
       const res = await approveAction(id, payload());
       setState(res);
       setConfirming(false);
+    });
+  }
+
+  function runCheck() {
+    start(async () => {
+      const r = await checkNoteAction(id, payload());
+      if (r.ok) setCheck({ findings: (r.data as NoteFinding[]) ?? [], message: r.message });
+      else {
+        setCheck(null);
+        setState(r);
+      }
     });
   }
 
@@ -287,6 +301,26 @@ export function ReviewForm({
             <li key={i}>{l}</li>
           ))}
         </ol>
+      </section>
+
+      <section className="card">
+        <h2>Check before approving</h2>
+        <p className="muted">Looks at the note as it is on screen. Plain checks for things a reader would expect, then an AI second reader compares the note with the transcript. It is advice only: it changes nothing and never stops you approving.</p>
+        <button type="button" onClick={runCheck} disabled={pending}>{pending ? "Working…" : "Check this note"}</button>
+        <div role="status" style={{ marginTop: 8 }}>
+          {check?.message ? <div className="banner warn">{check.message}</div> : null}
+          {check && check.findings.length === 0 ? <div className="banner good">Nothing to flag.</div> : null}
+          {check && check.findings.length > 0 ? (
+            <ul className="plain">
+              {check.findings.map((f, i) => (
+                <li key={i}>
+                  <strong>{f.severity === "check" ? "Check: " : "Consider: "}</strong>{f.message}
+                  <span className="muted"> ({f.source === "assistant" ? `AI second reader, transcript line${f.lines && f.lines.length > 1 ? "s" : ""} ${f.lines?.join(", ")}` : "plain check"})</span>
+                </li>
+              ))}
+            </ul>
+          ) : null}
+        </div>
       </section>
 
       <section className="card">
