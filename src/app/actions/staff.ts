@@ -370,6 +370,7 @@ export async function saveFormAction(_prev: ActionState, form: FormData): Promis
     await getPlatform().forms.save(user.clinicId, user.email, {
       id: field(form, "id") || undefined, name: field(form, "name"), kind: field(form, "kind") === "consent" ? "consent" : "intake",
       fieldsJson: field(form, "fields"), mandatory: bool(form, "mandatory"), active: bool(form, "active"),
+      discipline: (["any", "physio", "ayurveda"] as const).find((d) => d === field(form, "discipline")),
     });
   } catch (err) {
     return fail(err);
