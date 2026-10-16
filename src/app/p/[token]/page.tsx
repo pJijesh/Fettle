@@ -3,6 +3,7 @@ import { getPublicService } from "@/lib/app";
 import { checkInAction } from "../../actions";
 import { ActionForm } from "../../Forms";
 import { KIND_LABEL } from "@/lib/ayurveda/schemas";
+import { LANGUAGE_CODES } from "@/lib/assist/tasks";
 
 export const dynamic = "force-dynamic";
 export const metadata: Metadata = { title: "Your plan", robots: { index: false, follow: false } };
@@ -35,6 +36,12 @@ export default async function PatientPage({ params }: { params: Promise<{ token:
     <main style={{ maxWidth: 560 }}>
       <h1>{p.title}</h1>
       <p className="muted">From {view.practitioner}</p>
+      {view.summary ? (
+        <section className="card" aria-labelledby="sum" lang={LANGUAGE_CODES[view.summary.language] ?? "en-GB"} dir={view.summary.language === "Arabic" || view.summary.language === "Urdu" ? "rtl" : undefined}>
+          <h2 id="sum">About your visit</h2>
+          {view.summary.text.split(/\n{2,}/).map((para, i) => <p key={i} style={{ whiteSpace: "pre-wrap" }}>{para}</p>)}
+        </section>
+      ) : null}
       {p.intro ? <p>{p.intro}</p> : null}
 
       {p.safetyAdvice.length ? (
