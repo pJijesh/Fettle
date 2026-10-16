@@ -12,11 +12,27 @@ For whoever runs Fettle in production. It covers configuration, backups, restore
 | `APP_BASE_URL` | Public URL used in emails and texts. Use `https` in production |
 | `CRON_SECRET`, `DISABLE_BACKGROUND_TICK` | Run the background work from an external scheduler instead of inside the app. Call `POST /api/worker` with `Authorization: Bearer <CRON_SECRET>` |
 | `TRANSCRIPT_RETENTION_DAYS` | Days after approval before a consultation transcript is cleared. Default 30; `0` keeps them |
+| `SMTP_HOST`, `SMTP_PORT`, `SMTP_SECURE`, `SMTP_USER`, `SMTP_PASS`, `SMTP_FROM`, `SMTP_REPLY_TO` | Email through any SMTP service. See "Email and text delivery" |
+| `TWILIO_ACCOUNT_SID`, `TWILIO_AUTH_TOKEN`, `TWILIO_FROM` | Text messages through Twilio. All three or none |
 | `AI_PROVIDER`, `ANTHROPIC_API_KEY` | Physiotherapy drafting. The default is a labelled mock |
 
 Serve the app only over HTTPS, behind a proxy that sets `X-Forwarded-Proto: https`. The app then sends `Strict-Transport-Security` and `upgrade-insecure-requests`. Without that header it assumes plain HTTP and sends neither, so the browser is never told to insist on HTTPS.
 
 Security headers on every page: a Content-Security-Policy with a fresh script nonce per request, `X-Frame-Options: DENY`, `X-Content-Type-Options`, `Referrer-Policy: no-referrer`, a `Permissions-Policy` that switches off camera, microphone, location and payment, and `Cross-Origin-Opener-Policy: same-origin`. If you add a third-party script, font or image host, add it to `src/lib/csp.ts`; the browser will otherwise block it.
+
+## Email and text delivery
+
+With no `SMTP_*` or `TWILIO_*` settings the app uses a development mailer that sends nothing, and says so in a banner. Setting `SMTP_HOST` switches email on; setting the `TWILIO_*` trio switches texts on. A partly filled configuration stops the app at start-up with a message saying what is missing. If only email is set up, queued texts fail with "No text provider is set up" and are retried, then recorded as failed in the Outbox.
+
+Before the first real send:
+
+1. Choose a provider that processes data in the UK or EU and sign its data-processing agreement. Messages carry a patient's name, appointment time and place, so the provider is a sub-processor.
+2. Send from a domain you control and set SPF, DKIM and DMARC for it, or confirmations will land in spam.
+3. Port 587 requires STARTTLS and the app refuses to send in the clear; use 465 only if the provider offers implicit TLS.
+4. Send a test confirmation to yourself, and read the headers: check SPF, DKIM and DMARC all pass.
+5. Text sender: a number you have bought, or an alphanumeric sender name registered with Twilio (not all UK networks accept unregistered names).
+
+Each email carries a stable `Message-ID` taken from the outbox row, so a duplicate attempt is recognisable to the receiver. The outbox records a failed attempt as a status code only (for example `SMTP 550` or `Twilio 400 code 21211`); look the code up with the provider. Provider messages are not stored because they usually repeat the recipient's address. Patient phone numbers are converted from UK format to international form (07700 900123 becomes +447700900123); a number that cannot be converted fails with "not a valid phone number" and is not retried successfully, so fix the patient's number.
 
 ## Deploying and upgrading
 
@@ -89,11 +105,12 @@ Alert on: `level":"error"`, `/api/health` failing, a `tick` line with `failed` o
 |---|---|
 | Health check fails | Database reachable? `DATABASE_URL` correct, `fettle_app` has LOGIN and password? |
 | Everyone's pages are empty | The app is connecting as the wrong role, or a migration did not run |
-| Reminders not going out | Is the tick running (`DISABLE_BACKGROUND_TICK`, `CRON_SECRET`)? Is a real mail provider configured? The development mailer sends nothing |
+| Reminders not going out | Is the tick running (`DISABLE_BACKGROUND_TICK`, `CRON_SECRET`)? Is a real provider configured (no banner about a development mailer)? Look at the Outbox for the failure code |
 | Patient links stopped working | `LINK_SECRET` changed |
 | Page loads but buttons do nothing | A Content-Security-Policy block. Check the browser console and `src/lib/csp.ts` |
 
 ## What has been tested
 
 - `scripts/backup.sh` and `scripts/restore-verify.sh`: run against a local Postgres 16 with and without encryption. A wrong passphrase, a corrupted file and a backup missing a migration each fail with a clear message.
+- Email and text providers: tested against a local SMTP server and a local stand-in for Twilio's API (delivery, wrong password, rejected recipient, no encryption offered, unreachable service, retries). Never against a real provider.
 - Not yet tested: a managed Postgres, a scheduled job, off-site copy, restore onto a different server, restore timing at real data sizes.

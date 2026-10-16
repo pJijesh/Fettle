@@ -36,7 +36,7 @@ npm install
 cp .env.example .env.local     # set LINK_SECRET (and APP_BASE_URL outside localhost)
 npm run db:up                  # starts Postgres in Docker and applies db/migrations
 npm run dev                    # http://localhost:3000, goes to /setup on first run
-npm test                       # 202 tests, against a real Postgres (see below)
+npm test                       # 213 tests, against a real Postgres (see below)
 npm run typecheck
 npm run build && npm start
 ```
@@ -64,7 +64,7 @@ Tests need a Postgres superuser connection (`TEST_DATABASE_URL`, default `postgr
 |---|---|
 | Consent gate, approval gate, immutable approved snapshot with hash, audit log (Phase 0) | Built and tested |
 | Diary, double-booking protection, time zones (including both clock changes) | Built and tested. Times are stored in UTC and shown in the clinic's zone (Europe/London) |
-| **Email and text sending** | **Not connected.** A development mailer accepts messages and the Outbox page lists them; nothing leaves the machine, and a banner says so on every staff page. A real provider needs a contract, a sender domain and a UK data-processing agreement, then an implementation of the `Mailer` interface in `src/lib/outbox.ts` |
+| **Email and text sending** | **Built and tested against local stand-ins, never against a real provider.** Email goes through any SMTP service (`SMTP_*` settings; port 587 refuses to send unencrypted) and texts through Twilio (`TWILIO_*`), chosen from the environment. With nothing set the development mailer is used: it sends nothing, the Outbox page lists the messages and a banner says so on every staff page. A half-filled configuration stops the app at start-up. Provider errors are stored as a status code only, because providers repeat the address. **Still needed: a provider contract, a UK data-processing agreement, a verified sender domain (SPF, DKIM, DMARC), and a first real send** |
 | **Tenancy** | Postgres row-level security: every query runs in a transaction that names one clinic, the app connects as a role that cannot bypass the policies, and a query that forgets its `WHERE clinic_id` still sees only its own clinic (tested at the database and through the service). Patient links and tokens find their clinic through narrow lookup functions. Backup and restore-verify scripts are written and tested against a local Postgres. **Not yet done: a UK-region managed database, scheduled and off-site backups, and a restore drill on the real host. A gate item before real data** |
 | **Import** | CSV and Excel through a column check you can correct by hand. None of the three vendors publish their column headings, so **nothing has been checked against a real Cliniko, TM3 or WriteUpp export**. **TM3's own data extraction (a `tmBase` folder) cannot be read**; a sample would be needed to build and test a reader. Treatment notes, documents, invoices and consent are not imported |
 | Drafting | **Mock provider by default** (a keyword matcher, labelled as not clinical). `AI_PROVIDER=anthropic` is available but **has not been exercised against the live API** |
@@ -78,7 +78,7 @@ Tests need a Postgres superuser connection (`TEST_DATABASE_URL`, default `postgr
 
 ## Checked
 
-- 202 automated tests, each in its own fresh Postgres database under the same row-level security as production: domain rules, accounts and second factor, clock-change days, overlap protection (service and database), truly concurrent booking, clinic separation (database policies and service calls), online booking, manage links, forms, portal codes, waiting list (first accept wins, expiry, matching), outbox idempotency and retries, reminders, calendar feed, import with dry run, column mapping, Excel and undo.
+- 213 automated tests, each in its own fresh Postgres database under the same row-level security as production: domain rules, accounts and second factor, clock-change days, overlap protection (service and database), truly concurrent booking, clinic separation (database policies and service calls), online booking, manage links, forms, portal codes, waiting list (first accept wins, expiry, matching), outbox idempotency and retries, reminders, calendar feed, import with dry run, column mapping, Excel and undo.
 - Browser walkthrough of the data-rights screens (download, anonymise with and without override, retention page), the VAT number rules and invoice, and every page checked for Content-Security-Policy violations, plus a check that an injected script and inline handler are blocked. Backup and restore-verify run with and without encryption, and fail clearly on a wrong passphrase, a corrupted file and a missing migration.
 - Browser walkthroughs of billing (invoice, part payment, overpayment refused, reversal, credit note) and Ayurveda (consent, refused when incomplete, approval, patient plan on a phone, check-in).
 - Browser walkthrough of every Phase 1 screen: first-run set-up and two-step sign-in, booking and portal as a patient on a phone, drag-and-drop on the calendar, role restrictions (reception cannot reach settings, consultations, import or the outbox), lock-out.
@@ -93,7 +93,7 @@ Tests need a Postgres superuser connection (`TEST_DATABASE_URL`, default `postgr
 - Billing checked by an accountant, including VAT invoice requirements.
 - DPIA, DTAC and clinical safety (DCB0129) work, and an MHRA intended-purpose analysis.
 - Clinical review of the prompt, catalogue, starter intake form and safety wording.
-- A real email and text provider, then end-to-end tests of delivery.
+- A real email and text provider (the code is ready), a sender domain, and a first real send to check delivery and spam placement.
 - Import checked against real exports from each system you are switching from.
 - Manual accessibility review and penetration test.
 - Error reporting and uptime alerting wired to the JSON logs and `/api/health`.
@@ -104,7 +104,7 @@ Tests need a Postgres superuser connection (`TEST_DATABASE_URL`, default `postgr
 - `db/migrations/`: the schema, row-level security policies, the overlap constraint and the `fettle_app` role. `src/lib/db.ts`: the clinic-scoped transaction layer. `src/lib/migrate.ts`: the migration runner.
 - `src/lib/accounts.ts`, `crypto.ts`, `auth.ts`: users, sessions, two-step sign-in.
 - `src/lib/scheduling.ts`: patients, types, hours, availability, appointments, calendar markers.
-- `src/lib/forms.ts`, `booking.ts`, `waitlist.ts`, `outbox.ts`, `notify.ts`, `ical.ts`, `importer.ts`, `seed.ts`: the rest of Phase 1. `platform.ts` wires them together.
+- `src/lib/mail/` (SMTP, Twilio and provider choice), `src/lib/forms.ts`, `booking.ts`, `waitlist.ts`, `outbox.ts`, `notify.ts`, `ical.ts`, `importer.ts`, `seed.ts`: the rest of Phase 1. `platform.ts` wires them together.
 - `src/lib/service.ts`, `ai/`, `writeback/`: the consultation workflow (consent, drafting for physiotherapy, approval, patient link, check-in, write-back). `ayurveda/`: the Ayurvedic record and plan shapes, starter library, approval rules and note formatting.
 - `src/lib/billing.ts`, `money.ts`, `vat.ts`: invoices, payments, credit notes, figures and VAT number checks. `reports.ts`: practice figures. `records.ts`: patient export, anonymisation, retention.
 - `src/proxy.ts`, `src/lib/csp.ts`: the Content-Security-Policy and security headers. `src/lib/log.ts`: JSON logging. `scripts/backup.sh`, `scripts/restore-verify.sh` and `docs/OPERATIONS.md`: backups and the runbook.

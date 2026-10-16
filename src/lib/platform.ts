@@ -1,12 +1,13 @@
 import type { Db } from "./db";
 import { logError } from "./log";
+import { createMailer } from "./mail";
 import { Accounts } from "./accounts";
 import { Booking } from "./booking";
 import { Forms } from "./forms";
 import { Ical } from "./ical";
 import { Importer } from "./importer";
 import { Notifier } from "./notify";
-import { DevMailer, Outbox, type Mailer } from "./outbox";
+import { Outbox, type Mailer } from "./outbox";
 import { Billing } from "./billing";
 import { Records } from "./records";
 import { Reports } from "./reports";
@@ -17,7 +18,7 @@ import { Waitlist } from "./waitlist";
 export function createPlatform(db: Db, opts: { now?: () => Date; baseUrl?: () => string; mailer?: Mailer } = {}) {
   const now = opts.now ?? (() => new Date());
   const baseUrl = opts.baseUrl ?? (() => (process.env.APP_BASE_URL ?? "http://localhost:3000").replace(/\/$/, ""));
-  const mailer = opts.mailer ?? new DevMailer();
+  const mailer = opts.mailer ?? createMailer();
 
   const accounts = new Accounts(db, now);
   const outbox = new Outbox(db, now);
