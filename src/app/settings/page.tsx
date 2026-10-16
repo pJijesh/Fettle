@@ -37,6 +37,9 @@ async function SettingsBody(user: SessionUser) {
       <Header user={user} />
       <main style={{ maxWidth: 900 }}>
         <h1>Settings</h1>
+        <p className="row">
+          <Link className="btn" href="/settings/templates">Note templates</Link>
+        </p>
         {isOwner ? (
           <p className="row">
             <Link className="btn" href="/settings/forms">Intake forms</Link>

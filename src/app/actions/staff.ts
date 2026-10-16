@@ -11,6 +11,7 @@ import type { PatientInput } from "@/lib/scheduling";
 import type { ImportKind, ImportSource } from "@/lib/import-meta";
 import { readTable } from "@/lib/sheet";
 import { parsePounds } from "@/lib/money";
+import { bodyFromText } from "@/lib/templates";
 
 const bool = (form: FormData, name: string) => form.get(name) === "yes";
 
@@ -377,6 +378,49 @@ export async function saveFormAction(_prev: ActionState, form: FormData): Promis
   }
   revalidatePath("/settings/forms");
   return { ok: true, message: "Saved. New appointments use this version; forms already sent keep the questions they were sent with." };
+}
+
+// ------------------------------------------------------------------ note templates (owner and clinicians)
+
+export async function saveTemplateAction(_prev: ActionState, form: FormData): Promise<ActionState> {
+  const user = await requireUser(["owner", "clinician"]);
+  try {
+    await getPlatform().templates.save(user.clinicId, user.email, {
+      id: field(form, "id") || undefined,
+      name: field(form, "name"),
+      active: bool(form, "active"),
+      bodyJson: bodyFromText({
+        subjective: field(form, "subjective"), objective: field(form, "objective"), rom: field(form, "rom"),
+        outcomeMeasures: field(form, "outcomeMeasures"), specialTests: field(form, "specialTests"), assessment: field(form, "assessment"), plan: field(form, "plan"),
+      }),
+    });
+  } catch (err) {
+    return fail(err);
+  }
+  revalidatePath("/settings/templates");
+  return { ok: true, message: "Saved. Notes already written are not changed." };
+}
+
+export async function deleteTemplateAction(_prev: ActionState, form: FormData): Promise<ActionState> {
+  const user = await requireUser(["owner", "clinician"]);
+  try {
+    await getPlatform().templates.remove(user.clinicId, user.email, field(form, "id"));
+  } catch (err) {
+    return fail(err);
+  }
+  revalidatePath("/settings/templates");
+  return { ok: true, message: "Deleted." };
+}
+
+export async function addStarterTemplatesAction(_prev: ActionState, _form: FormData): Promise<ActionState> {
+  const user = await requireUser(["owner", "clinician"]);
+  try {
+    const n = await getPlatform().templates.addStarters(user.clinicId, user.email);
+    revalidatePath("/settings/templates");
+    return { ok: true, message: n ? `Added ${n} example template${n === 1 ? "" : "s"}. Edit them to match how you work.` : "You already have all the examples." };
+  } catch (err) {
+    return fail(err);
+  }
 }
 
 // ------------------------------------------------------------------ switching import (owner)

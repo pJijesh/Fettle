@@ -79,7 +79,7 @@ These are targets for a pilot, not claims. No pilot has run yet.
 | C6 | Two-tap check-in from the link (how the pain or symptoms are, and whether the plan is being followed). Worse-than-before surfaces on the calendar | Built |
 | C7 | Optional write-back of the approved note to Cliniko. Idempotent; an uncertain outcome stops for a person to check | Built (unverified against the live API) |
 | C8 | Audio capture and transcription inside the app | Not built |
-| C9 | Note templates beyond the default structure | Not built |
+| C9 | Note templates beyond the default structure: clinic-written prompts for rows and standard wording, added by the physio on the review screen. Never holds a finding; fills only empty parts | Built. The three example templates need clinical review |
 | C10 | Live AI drafting using the Anthropic provider | Built, never run live |
 
 ### 4.2 Ayurveda
@@ -227,7 +227,7 @@ Access to billing is owner and reception only. Clinicians are denied.
 | Money | Whole pence everywhere |
 | Drafting | Provider interface: a labelled mock by default; Anthropic available |
 
-Migrations: 0001 schema, 0002 hardening, 0003 billing, 0004 Ayurveda, 0005 records and VAT number, 0006 form discipline, 0007 card payment ids.
+Migrations: 0001 schema, 0002 hardening, 0003 billing, 0004 Ayurveda, 0005 records and VAT number, 0006 form discipline, 0007 card payment ids, 0008 note templates.
 
 Repository layout is in the README.
 
@@ -241,7 +241,11 @@ Consultation workflow · diary and front desk · row-level security on Postgres 
 
 ### Gap fixes (merged, PR #5)
 
-Patient export, anonymisation and retention (P3 to P5) · Content-Security-Policy, HSTS, Permissions-Policy · structured logs, backup and restore-verify scripts, runbook, `npm audit` in CI · VAT registration number on invoices and refund wording. 224 tests pass.
+Patient export, anonymisation and retention (P3 to P5) · Content-Security-Policy, HSTS, Permissions-Policy · structured logs, backup and restore-verify scripts, runbook, `npm audit` in CI · VAT registration number on invoices and refund wording. 234 tests pass.
+
+### Built since (merged)
+
+Email and text through real providers (tested against stand-ins) · Ayurveda intake form · card payments through Stripe (tested against a stand-in) · note templates. 234 tests pass.
 
 ### Next, in order
 
@@ -251,11 +255,11 @@ Patient export, anonymisation and retention (P3 to P5) · Content-Security-Polic
 | 2 | Real email and text provider | Contract, sender domain, UK data-processing agreement |
 | 3 | Live check of the Anthropic provider and Cliniko write-back | Credentials; a test account |
 | 4 | Import tried on real exports | Samples from at least one clinic |
-| 5 | Clinical review of the physio catalogue and the Ayurveda library | Qualified reviewers |
+| 5 | Clinical review of the physio catalogue, the Ayurveda library, the intake forms and the example note templates | Qualified reviewers |
 | 6 | Closed pilot with one or two clinics, then a load test | Steps 1 to 5 |
 | 7 | DPIA, DCB0129, DTAC, MHRA analysis, penetration test, manual accessibility review | A pilot to learn from |
-| 8 | Card payments (Stripe), insurer claim submission | Accounts; demand from the pilot |
-| 9 | Note templates, audio capture, mobile apps | Pilot feedback |
+| 8 | Insurer claim submission | Insurer requirements; demand from the pilot |
+| 9 | Audio capture, mobile apps | Pilot feedback |
 
 ### Gate to real patient data
 
