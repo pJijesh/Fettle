@@ -13,6 +13,7 @@ import { Billing } from "./billing";
 import { Records } from "./records";
 import { Reports } from "./reports";
 import { Scheduling } from "./scheduling";
+import { NoteTemplates } from "./templates";
 import { Waitlist } from "./waitlist";
 
 /** Wires the diary, forms, messaging and waiting list together. One per process. */
@@ -25,6 +26,7 @@ export function createPlatform(db: Db, opts: { now?: () => Date; baseUrl?: () =>
   const outbox = new Outbox(db, now);
   const notifier = new Notifier(db, outbox, baseUrl, now);
   const forms = new Forms(db, now);
+  const templates = new NoteTemplates(db, now);
   const scheduling = new Scheduling(db, now);
   const waitlist = new Waitlist(db, scheduling, notifier, now);
   const booking = new Booking(db, scheduling, forms, notifier, now);
@@ -102,7 +104,7 @@ export function createPlatform(db: Db, opts: { now?: () => Date; baseUrl?: () =>
     return total;
   }
 
-  return { db, now, accounts, scheduling, forms, booking, waitlist, outbox, notifier, ical, importer, reports, billing, records, mailer, tick, baseUrl };
+  return { db, now, accounts, scheduling, forms, templates, booking, waitlist, outbox, notifier, ical, importer, reports, billing, records, mailer, tick, baseUrl };
 }
 
 export type Platform = ReturnType<typeof createPlatform>;

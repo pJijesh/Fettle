@@ -2,7 +2,7 @@ import Link from "next/link";
 import { notFound } from "next/navigation";
 import { requireUser } from "@/lib/auth";
 import type { SessionUser } from "@/lib/accounts";
-import { getService, withClinic } from "@/lib/app";
+import { getPlatform, getService, withClinic } from "@/lib/app";
 import { DomainError } from "@/lib/service";
 import { CATALOGUE } from "@/lib/ai/catalogue";
 import { describeDose } from "@/lib/format";
@@ -49,6 +49,7 @@ async function ConsultPageBody({ params }: Props, user: SessionUser) {
   const lines = transcriptLines(c.transcript);
   const approved = c.status === "approved";
   const ayu = c.discipline === "ayurveda";
+  const templates = !ayu && c.status === "drafted" ? await getPlatform().templates.list(user.clinicId, { activeOnly: true }) : [];
   const hasActiveLink = c.links.some((l) => !l.revokedAt && new Date(l.expiresAt) > new Date());
 
   return (
@@ -141,6 +142,7 @@ async function ConsultPageBody({ params }: Props, user: SessionUser) {
               catalogue={CATALOGUE.map((e) => ({ id: e.id, name: e.name }))}
               transcriptLines={lines}
               practitioner={user.name}
+              templates={templates.map((t) => ({ id: t.id, name: t.name, body: t.body }))}
             />
           </>
         ) : null}

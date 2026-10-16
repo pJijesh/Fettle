@@ -5,6 +5,7 @@ import type { NoteDraft, ProgrammeDraft, Side } from "@/lib/schemas";
 import { approveAction, saveDraftsAction } from "../../actions";
 import type { ActionState } from "@/lib/action-util";
 import { Feedback } from "../../Forms";
+import { applyTemplate, type TemplateBody } from "@/lib/template-note";
 
 export interface ExerciseOption {
   id: string;
@@ -46,6 +47,7 @@ export function ReviewForm({
   catalogue,
   transcriptLines,
   practitioner,
+  templates = [],
 }: {
   id: string;
   initialNote: NoteDraft;
@@ -53,12 +55,15 @@ export function ReviewForm({
   catalogue: ExerciseOption[];
   transcriptLines: string[];
   practitioner: string;
+  templates?: { id: string; name: string; body: TemplateBody }[];
 }) {
   const [note, setNote] = useState(initialNote);
   const [prog, setProg] = useState(initialProgramme);
   const [state, setState] = useState<ActionState>({});
   const [pending, start] = useTransition();
   const [confirming, setConfirming] = useState(false);
+  const [tplId, setTplId] = useState(templates[0]?.id ?? "");
+  const [tplMsg, setTplMsg] = useState("");
 
   const payload = () => JSON.stringify({ note, programme: prog });
   const patchNote = (p: Partial<NoteDraft>) => setNote((n) => ({ ...n, ...p }));
@@ -73,6 +78,14 @@ export function ReviewForm({
       setState(res);
       setConfirming(false);
     });
+  }
+
+  function useTemplate() {
+    const t = templates.find((x) => x.id === tplId);
+    if (!t) return;
+    const res = applyTemplate(note, t.body);
+    setNote(res.note);
+    setTplMsg(res.added.length ? `Added from "${t.name}": ${res.added.join(", ")}. Nothing is saved until you save the draft.` : `Nothing to add from "${t.name}": the note already has everything in it.`);
   }
 
   const nextExerciseId = () => {
@@ -97,6 +110,20 @@ export function ReviewForm({
 
       <section className="card">
         <h2>Note</h2>
+        {templates.length ? (
+          <div className="sub">
+            <label htmlFor="tpl">Start from a template</label>
+            <div className="row">
+              <select id="tpl" value={tplId} onChange={(e) => setTplId(e.target.value)}>
+                {templates.map((t) => (
+                  <option key={t.id} value={t.id}>{t.name}</option>
+                ))}
+              </select>
+              <button type="button" onClick={useTemplate}>Add to this note</button>
+            </div>
+            <div className="muted" role="status">{tplMsg || "Fills empty boxes and adds rows to fill in. It never changes what is already written."}</div>
+          </div>
+        ) : null}
         <label htmlFor="subj">Subjective</label>
         <textarea id="subj" value={note.subjective} onChange={(e) => patchNote({ subjective: e.target.value })} />
         <label htmlFor="obj">Objective</label>
