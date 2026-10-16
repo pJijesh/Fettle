@@ -4,7 +4,7 @@ Version 3 · October 2026 · Owner: Jijesh P.
 
 This document says what Fettle is for, who it is for, what it must do, and what is built, in progress and not yet started. It replaces the earlier PRD v2. The README describes how to run the code; this describes what the product is meant to be. Where the two overlap, the README's "What is real and what is not" is the more cautious statement of fact.
 
-Status key: **Built** (in `main` or on the open `gap-fixes` branch, tested) · **In progress** · **Not built** · **Needs others** (cannot be closed by code alone).
+Status key: **Built** (in `main`, tested) · **In progress** · **Not built** · **Needs others** (cannot be closed by code alone).
 
 ---
 
@@ -239,7 +239,7 @@ Repository layout is in the README.
 
 Consultation workflow · diary and front desk · row-level security on Postgres 16 · hardening (rate limiting, password reset, recovery codes, reports, health) · billing · Ayurveda as a second discipline. 177 automated tests passed at that point.
 
-### Gap fixes (`gap-fixes`, awaiting merge)
+### Gap fixes (merged, PR #5)
 
 Patient export, anonymisation and retention (P3 to P5) · Content-Security-Policy, HSTS, Permissions-Policy · structured logs, backup and restore-verify scripts, runbook, `npm audit` in CI · VAT registration number on invoices and refund wording. 198 tests pass.
 
