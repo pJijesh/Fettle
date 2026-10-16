@@ -6,10 +6,13 @@ import { Accounts } from "./accounts";
 import { createPlatform, type Platform } from "./platform";
 import type { DraftingProvider } from "./ai/provider";
 import type { WritebackTarget } from "./writeback/types";
+import { createTranscriber } from "./speech";
+import type { Transcriber } from "./speech/types";
 
 const g = globalThis as unknown as {
   __ctpProvider?: DraftingProvider;
   __ctpTargets?: Record<string, WritebackTarget>;
+  __ctpTranscriber?: Transcriber | null;
   __ctpAccounts?: Accounts;
   __ctpPlatform?: Platform;
 };
@@ -18,7 +21,8 @@ const g = globalThis as unknown as {
 export function getService(clinicId: string): Service {
   g.__ctpProvider ??= createProvider();
   g.__ctpTargets ??= createTargets();
-  return new Service({ db: getDb(), clinicId, provider: g.__ctpProvider, targets: g.__ctpTargets });
+  if (g.__ctpTranscriber === undefined) g.__ctpTranscriber = createTranscriber();
+  return new Service({ db: getDb(), clinicId, provider: g.__ctpProvider, targets: g.__ctpTargets, transcriber: g.__ctpTranscriber });
 }
 
 export function getPlatform(): Platform {

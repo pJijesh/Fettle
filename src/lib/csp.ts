@@ -21,7 +21,7 @@ export function buildCsp(nonce: string, opts: { dev?: boolean; https?: boolean }
 }
 
 export const HSTS = "max-age=63072000; includeSubDomains";
-export const PERMISSIONS_POLICY = "camera=(), microphone=(), geolocation=(), payment=(), usb=(), interest-cohort=()";
+export const PERMISSIONS_POLICY = "camera=(), microphone=(self), geolocation=(), payment=(), usb=(), interest-cohort=()";
 
 /** True when the request reached us over https, directly or through a proxy that says so. */
 export function isHttps(url: string, forwardedProto: string | null): boolean {

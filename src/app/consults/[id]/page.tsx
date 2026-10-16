@@ -21,6 +21,7 @@ import { ActionForm, CopyButton, LinkMaker } from "../../Forms";
 import { Header } from "../../Header";
 import { ReviewForm } from "./ReviewForm";
 import { AyurvedaForm } from "./AyurvedaForm";
+import { AudioCapture } from "./AudioCapture";
 import { LIBRARY } from "@/lib/ayurveda/catalogue";
 import { KIND_LABEL, KIND_ORDER } from "@/lib/ayurveda/schemas";
 
@@ -93,7 +94,8 @@ async function ConsultPageBody({ params }: Props, user: SessionUser) {
         {c.consent && !approved && !ayu && c.status !== "drafted" ? (
           <section className="card">
             <h2>2. Consultation transcript</h2>
-            <p className="muted">Type or paste the transcript, one speaker turn per line. Audio capture is not part of this version.</p>
+            <p className="muted">{svc.audioInfo.enabled ? "Record the consultation, or type or paste the transcript, one speaker turn per line." : "Type or paste the transcript, one speaker turn per line. Audio capture is not switched on for this clinic."}</p>
+            {svc.audioInfo.enabled ? <AudioCapture id={id} providerName={svc.audioInfo.name} isMock={svc.audioInfo.isMock} /> : null}
             <ActionForm action={generateDraftsAction} hidden={{ id }} submitLabel="Save and generate drafts">
               <label htmlFor="transcript" className="noprint">Transcript</label>
               <textarea id="transcript" name="transcript" defaultValue={c.transcript} style={{ minHeight: 220 }} className="mono" />

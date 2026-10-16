@@ -18,6 +18,7 @@ import { AyurvedaDraft, AyurvedaPlan, AyurvedaRecord, KIND_ORDER, emptyPlan, emp
 import { ayurvedaApprovalIssues } from "./ayurveda/validation";
 import { ayurvedaNoteToText } from "./ayurveda/format";
 import type { WritebackTarget } from "./writeback/types";
+import { baseMime, formatLines, isAudioType, MAX_AUDIO_BYTES, type Transcriber } from "./speech/types";
 
 export type Discipline = "physio" | "ayurveda";
 export type Status = "created" | "consented" | "captured" | "drafted" | "approved";
@@ -36,6 +37,8 @@ export interface Deps {
   clinicId: string;
   provider: DraftingProvider;
   targets: Record<string, WritebackTarget>;
+  /** Turns a recording into text. Null or absent means audio capture is off. */
+  transcriber?: Transcriber | null;
   now?: () => Date;
 }
 
@@ -166,6 +169,7 @@ export class Service {
   private clinicId: string;
   private provider: DraftingProvider;
   private targets: Record<string, WritebackTarget>;
+  private transcriber: Transcriber | null;
   private now: () => Date;
 
   constructor(deps: Deps) {
@@ -173,11 +177,16 @@ export class Service {
     this.clinicId = deps.clinicId;
     this.provider = deps.provider;
     this.targets = deps.targets;
+    this.transcriber = deps.transcriber ?? null;
     this.now = deps.now ?? (() => new Date());
   }
 
   get providerInfo() {
     return { name: this.provider.name, model: this.provider.model, isMock: this.provider.isMock };
+  }
+
+  get audioInfo() {
+    return this.transcriber ? { enabled: true, name: this.transcriber.name, isMock: this.transcriber.isMock } : { enabled: false, name: "", isMock: false };
   }
 
   get targetInfo() {
@@ -384,6 +393,57 @@ export class Service {
       const status: Status = row.status === "drafted" ? "drafted" : text.trim() ? "captured" : "consented";
       await this.db.run("UPDATE consults SET transcript = ?, status = ?, updated_at = ? WHERE id = ?", [text, status, this.ts(), id]);
       await this.audit(id, actor, "transcript.saved", { chars: text.length });
+    });
+  }
+
+  /**
+   * Turns a recording into transcript text and adds it to the consultation's transcript. The audio is held in memory
+   * for the length of this call and is never written anywhere: only the text is kept, and the audit trail records
+   * sizes and the confirmation, never content. Three steps so no connection is held while the speech service works.
+   */
+  async captureAudio(id: string, input: { audio: Uint8Array; mime: string; audioConsent: boolean }, actor: string, signal?: AbortSignal): Promise<{ transcript: string; added: string }> {
+    const transcriber = this.transcriber;
+    if (!transcriber) throw new DomainError("invalid_state", "Audio capture is not set up for this clinic");
+    if (!input.audioConsent) {
+      throw new DomainError("validation", "Confirm the patient agreed to the recording", [{ path: "audioConsent", message: "Confirm the patient agreed to the recording" }]);
+    }
+    if (!isAudioType(input.mime)) throw new DomainError("validation", "That is not a supported audio file", [{ path: "audio", message: "Use a recording from the browser or an audio file (webm, ogg, mp3, m4a, wav, flac)" }]);
+    if (input.audio.length === 0) throw new DomainError("validation", "The recording is empty", [{ path: "audio", message: "Nothing was recorded" }]);
+    if (input.audio.length > MAX_AUDIO_BYTES) throw new DomainError("validation", "The recording is too large", [{ path: "audio", message: "Keep it under 100 MB" }]);
+
+    await this.in(async () => {
+      const row = await this.row(id, true);
+      this.requirePhysio(row);
+      this.requireEditable(row);
+      this.requireConsent(row);
+      await this.audit(id, actor, "audio.received", { bytes: input.audio.length, type: baseMime(input.mime), provider: transcriber.name, audioConsentConfirmed: true });
+    });
+
+    let text: string;
+    try {
+      text = formatLines(await transcriber.transcribe(input.audio, input.mime, signal));
+    } catch (err) {
+      if (signal?.aborted) throw err;
+      const message = err instanceof Error ? err.message : "failed";
+      await this.in(() => this.audit(id, actor, "audio.failed", { reason: message.slice(0, 80) }));
+      throw new DomainError("draft_failed", "The recording could not be turned into text. Nothing was saved and the audio was not kept. You can try again or type the transcript.");
+    }
+    if (!text.trim()) throw new DomainError("validation", "No speech was found in the recording", [{ path: "audio", message: "No speech was found" }]);
+
+    return this.in(async () => {
+      const row = await this.row(id, true);
+      this.requirePhysio(row);
+      this.requireEditable(row);
+      // Consent may have been withdrawn while the recording was being processed; the text is then discarded.
+      this.requireConsent(row);
+      const joined = row.transcript?.trim() ? `${row.transcript.trimEnd()}\n${text}` : text;
+      if (joined.length > MAX_TRANSCRIPT_CHARS) {
+        throw new DomainError("validation", "The transcript is too long", [{ path: "transcript", message: "Keep it under 200,000 characters" }]);
+      }
+      const status: Status = row.status === "drafted" ? "drafted" : "captured";
+      await this.db.run("UPDATE consults SET transcript = ?, status = ?, updated_at = ? WHERE id = ?", [joined, status, this.ts(), id]);
+      await this.audit(id, actor, "audio.transcribed", { chars: text.length, provider: transcriber.name });
+      return { transcript: joined, added: text };
     });
   }
 
