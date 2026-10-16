@@ -113,7 +113,7 @@ Ayurveda is not a regulated profession in the UK. The product records who practi
 | D9 | Waiting list: freed times offered to the first five matches for 15 minutes; first to accept wins; offers hold the time | Built |
 | D10 | Messages: confirmation, reminder (24 h), cancellation, moved, offer, sign-in code. Idempotent; text only to patients who agreed; back-off, five tries | Built |
 | D11 | Read-only calendar feed per clinician, secret URL, initials and type only | Built |
-| D12 | **Real email and text delivery** | Not built; a development mailer only |
+| D12 | **Real email and text delivery**: email through any SMTP service, texts through Twilio, chosen by environment | Built, tested against local stand-ins only. Needs a provider contract, DPA and sender domain |
 | D13 | Practice reports: attendance, did-not-attend, cancellation, new patients, utilisation, bookings by source; counts only | Built |
 
 ### 4.4 Patients and records
@@ -241,7 +241,7 @@ Consultation workflow · diary and front desk · row-level security on Postgres 
 
 ### Gap fixes (merged, PR #5)
 
-Patient export, anonymisation and retention (P3 to P5) · Content-Security-Policy, HSTS, Permissions-Policy · structured logs, backup and restore-verify scripts, runbook, `npm audit` in CI · VAT registration number on invoices and refund wording. 202 tests pass.
+Patient export, anonymisation and retention (P3 to P5) · Content-Security-Policy, HSTS, Permissions-Policy · structured logs, backup and restore-verify scripts, runbook, `npm audit` in CI · VAT registration number on invoices and refund wording. 213 tests pass.
 
 ### Next, in order
 

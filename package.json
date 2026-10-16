@@ -17,6 +17,7 @@
   "dependencies": {
     "@anthropic-ai/sdk": "^0.133.0",
     "next": "^16.4.0",
+    "nodemailer": "^10.1.2",
     "pg": "^8.23.1",
     "qrcode": "^1.5.4",
     "react": "^19.3.0",
@@ -25,11 +26,16 @@
     "zod": "^4.6.6"
   },
   "devDependencies": {
+    "@types/mailparser": "^3.9.0",
     "@types/node": "^26.6.5",
+    "@types/nodemailer": "^8.0.2",
     "@types/pg": "^8.23.1",
     "@types/qrcode": "^1.5.6",
     "@types/react": "^19.3.0",
     "@types/react-dom": "^19.3.0",
+    "@types/smtp-server": "^3.5.13",
+    "mailparser": "^3.9.40",
+    "smtp-server": "^3.19.23",
     "tsx": "^4.23.15",
     "typescript": "^7.0.2",
     "vitest": "^5.0.4",

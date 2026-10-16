@@ -303,7 +303,7 @@ export class Records {
       await this.db.run("UPDATE waitlist SET status = 'removed' WHERE clinic_id = ? AND patient_id = ? AND status IN ('waiting','offered')", [c, patientId]);
       if (addrs.length) {
         const marks = addrs.map(() => "?").join(",");
-        await this.db.run(`UPDATE outbox SET to_addr = '', subject = '', body = '[removed]', status = CASE WHEN status = 'queued' THEN 'failed' ELSE status END, error = CASE WHEN status = 'queued' THEN 'Patient anonymised' ELSE error END WHERE clinic_id = ? AND to_addr IN (${marks})`, [c, ...addrs]);
+        await this.db.run(`UPDATE outbox SET to_addr = '', subject = '', body = '[removed]', status = CASE WHEN status = 'queued' THEN 'failed' ELSE status END, error = CASE WHEN status = 'queued' THEN 'Patient anonymised' ELSE NULL END WHERE clinic_id = ? AND to_addr IN (${marks})`, [c, ...addrs]);
       }
       await this.scheduling.audit(c, actor.email, "patient.anonymised", "patient", { patientId, beforeRetentionEnd: !info.due, reason: reason || undefined });
     });
