@@ -16,6 +16,8 @@ import { Scheduling } from "./scheduling";
 import { NoteTemplates } from "./templates";
 import { Documents } from "./documents";
 import { Assistant } from "./assistant";
+import { Triage } from "./triage";
+import { Progress } from "./progress";
 import { createAssist, type AssistProvider } from "./assist";
 import { Waitlist } from "./waitlist";
 
@@ -33,6 +35,8 @@ export function createPlatform(db: Db, opts: { now?: () => Date; baseUrl?: () =>
   const assist = opts.assist ?? createAssist();
   const documents = new Documents(db, assist, now);
   const assistant = new Assistant(db, assist, now);
+  const triage = new Triage(db, assist, now);
+  const progress = new Progress(db, assist, now);
   const scheduling = new Scheduling(db, now);
   const waitlist = new Waitlist(db, scheduling, notifier, now);
   const booking = new Booking(db, scheduling, forms, notifier, now);
@@ -110,7 +114,7 @@ export function createPlatform(db: Db, opts: { now?: () => Date; baseUrl?: () =>
     return total;
   }
 
-  return { db, now, accounts, scheduling, forms, templates, documents, assistant, assist, booking, waitlist, outbox, notifier, ical, importer, reports, billing, records, mailer, tick, baseUrl };
+  return { db, now, accounts, scheduling, forms, templates, documents, assistant, assist, triage, progress, booking, waitlist, outbox, notifier, ical, importer, reports, billing, records, mailer, tick, baseUrl };
 }
 
 export type Platform = ReturnType<typeof createPlatform>;

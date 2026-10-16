@@ -5,6 +5,7 @@ import { getPlatform, withClinic } from "@/lib/app";
 import { formatPence, poundsField } from "@/lib/money";
 import { minutesToClock } from "@/lib/tz";
 import { saveBillingSettingsAction } from "../actions/billing";
+import { setAiTriageAction } from "../actions/assist";
 import { saveDisciplinesAction, createUserAction, deactivateUserAction, icalRevokeAction, resetMfaAction, resetPasswordAction, saveHoursAction, saveTypeAction } from "../actions/staff";
 import { ActionForm } from "../Forms";
 import { Header } from "../Header";
@@ -30,6 +31,7 @@ async function SettingsBody(user: SessionUser) {
   const clinicianHours = isOwner
     ? await Promise.all((await p.scheduling.clinicians(user.clinicId)).map(async (c) => ({ c, hrs: await p.scheduling.getHours(user.clinicId, c.id) })))
     : [];
+  const aiTriage = isOwner ? await p.triage.aiOn(user.clinicId) : false;
   const base = p.baseUrl();
 
   return (
@@ -75,6 +77,14 @@ async function SettingsBody(user: SessionUser) {
                   <option value="both">Physiotherapy and Ayurveda</option>
                 </select>
                 <p className="muted">Turning a discipline on adds a few starter appointment types, which you can rename and price below. The Ayurvedic starter library of therapies, diet and daily routine has not been reviewed by a qualified Ayurvedic practitioner; review it before you use it with patients.</p>
+              </ActionForm>
+            </section>
+
+            <section className="card" aria-labelledby="triage">
+              <h2 id="triage">Patient check-ins</h2>
+              <p className="muted">Check-ins that say pain is worse, or whose comment mentions something like numbness, a fall or feeling unwell, are always listed under Check-ins. You can also let the AI assistant read the free-text comments and add more to that list. It can only add, never remove. The comment is sent to the AI vendor and can include anything the patient typed, so only switch this on if your privacy notice covers it. Off by default.</p>
+              <ActionForm action={setAiTriageAction} submitLabel="Save" submitClass="">
+                <label className="inline"><input type="checkbox" name="on" value="yes" defaultChecked={aiTriage} /> Let the AI assistant read check-in comments</label>
               </ActionForm>
             </section>
 

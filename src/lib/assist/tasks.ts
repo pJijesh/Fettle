@@ -111,3 +111,42 @@ ${COMMON}
     demo: () => ({ suggestions: [{ code: "M25.56", description: "Pain in knee", reason: "[Demo text] Not taken from the note." }] }),
   };
 }
+
+// ------------------------------------------------------------------ check-in triage
+
+export const TriageOut = z.object({ level: z.enum(["routine", "review"]), reason: z.string().trim().max(200) });
+export type TriageOut = z.infer<typeof TriageOut>;
+
+export function triageTask(adherence: string, painChange: string, comment: string): AssistTask<TriageOut> {
+  return {
+    name: "checkin_triage",
+    system: `You help a physiotherapy clinic notice patient check-ins that need a clinician's attention soon. A patient has done a short check-in after being given a home exercise programme. Decide whether it is "routine" or "review" (a clinician should look at it soon).
+${COMMON}
+- Choose "review" if the comment suggests anything that may need a clinician: new or spreading symptoms, numbness, weakness, loss of function, a fall or injury, swelling, fever, feeling unwell, distress or low mood, severe or worsening pain, difficulty coping, a request for help or a call back, side effects from medicine, or anything you are unsure about.
+- Choose "routine" only when the comment clearly describes nothing that needs attention, or is empty.
+- When unsure, choose "review". Never reassure the patient and never write advice to the patient.
+- Give a short reason a clinician can read at a glance, quoting the patient's own words where helpful.`,
+    user: `<check_in>\nExercises done: ${adherence}\nPain since last time: ${painChange}\nPatient's comment: ${comment || "(none)"}\n</check_in>\n\nCall submit with the level and reason.`,
+    schema: TriageOut,
+    demo: () => ({ level: "routine", reason: "[Demo] Not assessed by a real model." }),
+  };
+}
+
+// ------------------------------------------------------------------ progress summary
+
+export const ProgressOut = z.object({ text: z.string().trim().min(1).max(1500) });
+export type ProgressOut = z.infer<typeof ProgressOut>;
+
+export function progressTask(table: string): AssistTask<ProgressOut> {
+  return {
+    name: "progress_summary",
+    system: `You write a short factual summary of how a physiotherapy patient has progressed, for the treating physiotherapist to read before the next appointment.
+${COMMON}
+- Use only the figures supplied. Say what changed between the first and the latest recorded score for each outcome measure, and what the patient reported in check-ins. State plainly when there is too little data to say.
+- Do not say a change is good or bad, improved or deteriorated, unless the check-in text says so: you are not told which direction is better for each measure. Do not predict, diagnose or recommend treatment.
+- At most 120 words, in short sentences.`,
+    user: `<progress_data>\n${table}\n</progress_data>\n\nCall submit with the text.`,
+    schema: ProgressOut,
+    demo: () => ({ text: "[Demo text, not written from the data.] Scores were recorded at two visits." }),
+  };
+}

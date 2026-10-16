@@ -89,3 +89,34 @@ export async function suggestCodesAction(id: string): Promise<ActionState> {
     return fail(err);
   }
 }
+
+export async function markReviewedAction(_prev: ActionState, form: FormData): Promise<ActionState> {
+  const user = await staff();
+  try {
+    await getPlatform().triage.markReviewed(user, field(form, "checkInId"));
+  } catch (err) {
+    return fail(err);
+  }
+  revalidatePath("/check-ins");
+  return { ok: true, message: "Marked as seen." };
+}
+
+export async function setAiTriageAction(_prev: ActionState, form: FormData): Promise<ActionState> {
+  const user = await requireUser(["owner"]);
+  try {
+    await getPlatform().triage.setAi(user, field(form, "on") === "yes");
+  } catch (err) {
+    return fail(err);
+  }
+  revalidatePath("/settings");
+  return { ok: true, message: "Saved." };
+}
+
+export async function summariseProgressAction(patientId: string): Promise<ActionState> {
+  const user = await staff();
+  try {
+    return { ok: true, message: await getPlatform().progress.summarise(user, patientId) };
+  } catch (err) {
+    return fail(err);
+  }
+}

@@ -1,9 +1,10 @@
 "use server";
 
 import { redirect } from "next/navigation";
+import { after } from "next/server";
 import { revalidatePath } from "next/cache";
 import { requireUser } from "@/lib/auth";
-import { getPublicService, getService } from "@/lib/app";
+import { getPlatform, getPublicService, getService } from "@/lib/app";
 import { DomainError } from "@/lib/service";
 import { baseUrl, fail, field, type ActionState } from "@/lib/action-util";
 
@@ -225,12 +226,14 @@ export async function resolveWritebackAction(_prev: ActionState, form: FormData)
 
 export async function checkInAction(_prev: ActionState, form: FormData): Promise<ActionState> {
   try {
-    await getPublicService().submitCheckIn(field(form, "token"), {
+    const saved = await getPublicService().submitCheckIn(field(form, "token"), {
       adherence: field(form, "adherence"),
       painChange: field(form, "painChange"),
       comment: field(form, "comment"),
     });
-    return { ok: true, message: "Thank you. Your practitioner will see this." };
+    // After the answer is sent: if the clinic has switched the assistant on, it reads the comment. The patient never waits for it.
+    after(() => getPlatform().triage.assess(saved.clinicId, saved.checkInId));
+    return { ok: true, message: "Thank you. Your practitioner will see this. If you are worried, or it cannot wait, please do not wait for a reply: contact the clinic, call NHS 111, or call 999 in an emergency." };
   } catch (err) {
     return fail(err);
   }
