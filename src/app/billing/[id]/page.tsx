@@ -7,7 +7,8 @@ import { DomainError } from "@/lib/errors";
 import { formatVatNumber } from "@/lib/vat";
 import { formatPence, poundsField } from "@/lib/money";
 import { formatLocal, utcToZoned } from "@/lib/tz";
-import { creditInvoiceAction, recordPaymentAction, reversePaymentAction } from "../../actions/billing";
+import { cardLinkAction, creditInvoiceAction, recordPaymentAction, reversePaymentAction } from "../../actions/billing";
+import { CardLink } from "./CardLink";
 import { ActionForm } from "../../Forms";
 import { Header } from "../../Header";
 import { PrintButton } from "../PrintButton";
@@ -138,6 +139,13 @@ async function Body({ params }: Props, user: SessionUser) {
                 </table>
               </div>
             )}
+            {canPay && p.billing.cardPaymentsEnabled && inv.payerType !== "insurer" && inv.balancePence >= 30 ? (
+              <>
+                <h3>Take a card payment</h3>
+                <p className="muted">Makes a link for the patient to pay the {formatPence(inv.balancePence)} owed on Stripe&apos;s own page. Card details never reach Fettle, and the payment is recorded here when it succeeds.</p>
+                <CardLink action={cardLinkAction} invoiceId={inv.id} amount={formatPence(inv.balancePence)} />
+              </>
+            ) : null}
             {canPay ? (
               <>
                 <h3>Record a payment</h3>

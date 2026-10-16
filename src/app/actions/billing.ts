@@ -5,7 +5,7 @@ import { revalidatePath } from "next/cache";
 import { requireUser } from "@/lib/auth";
 import { getPlatform } from "@/lib/app";
 import { DomainError } from "@/lib/errors";
-import { parsePounds } from "@/lib/money";
+import { formatPence, parsePounds } from "@/lib/money";
 import { PAYMENT_METHODS, type LineInput, type PaymentMethod } from "@/lib/billing";
 import { fail, field, type ActionState } from "@/lib/action-util";
 
@@ -119,4 +119,15 @@ export async function creditInvoiceAction(_prev: ActionState, form: FormData): P
     return fail(err);
   }
   redirect(`/billing/${cn}`);
+}
+
+export async function cardLinkAction(_prev: ActionState, form: FormData): Promise<ActionState> {
+  const user = await requireUser([...STAFF]);
+  try {
+    const p = getPlatform();
+    const { url, amountPence } = await p.billing.createCardLink(user, field(form, "id"), p.baseUrl());
+    return { ok: true, url, message: `Link made for ${formatPence(amountPence)}. Send it to the patient; it works for 24 hours and the payment is recorded here automatically when they pay.` };
+  } catch (err) {
+    return fail(err);
+  }
 }

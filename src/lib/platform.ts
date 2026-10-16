@@ -1,6 +1,7 @@
 import type { Db } from "./db";
 import { logError } from "./log";
 import { createMailer } from "./mail";
+import { StripeCards, type CardProvider } from "./payments/stripe";
 import { Accounts } from "./accounts";
 import { Booking } from "./booking";
 import { Forms } from "./forms";
@@ -15,7 +16,7 @@ import { Scheduling } from "./scheduling";
 import { Waitlist } from "./waitlist";
 
 /** Wires the diary, forms, messaging and waiting list together. One per process. */
-export function createPlatform(db: Db, opts: { now?: () => Date; baseUrl?: () => string; mailer?: Mailer } = {}) {
+export function createPlatform(db: Db, opts: { now?: () => Date; baseUrl?: () => string; mailer?: Mailer; card?: CardProvider | null } = {}) {
   const now = opts.now ?? (() => new Date());
   const baseUrl = opts.baseUrl ?? (() => (process.env.APP_BASE_URL ?? "http://localhost:3000").replace(/\/$/, ""));
   const mailer = opts.mailer ?? createMailer();
@@ -31,6 +32,8 @@ export function createPlatform(db: Db, opts: { now?: () => Date; baseUrl?: () =>
   const importer = new Importer(db, scheduling, now);
   const reports = new Reports(db, now);
   const billing = new Billing(db, scheduling, now);
+  if (opts.card !== undefined) billing.setCardProvider(opts.card);
+  else if (process.env.STRIPE_SECRET_KEY) billing.setCardProvider(new StripeCards({ secretKey: process.env.STRIPE_SECRET_KEY, baseUrl: process.env.STRIPE_API_BASE || undefined }));
   const records = new Records(db, scheduling, now);
 
   accounts.setResetHook((m) => notifier.passwordReset(m.clinicId, m.to, m.name, m.token).then(() => undefined));

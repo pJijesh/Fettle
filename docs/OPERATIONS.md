@@ -14,6 +14,7 @@ For whoever runs Fettle in production. It covers configuration, backups, restore
 | `TRANSCRIPT_RETENTION_DAYS` | Days after approval before a consultation transcript is cleared. Default 30; `0` keeps them |
 | `SMTP_HOST`, `SMTP_PORT`, `SMTP_SECURE`, `SMTP_USER`, `SMTP_PASS`, `SMTP_FROM`, `SMTP_REPLY_TO` | Email through any SMTP service. See "Email and text delivery" |
 | `TWILIO_ACCOUNT_SID`, `TWILIO_AUTH_TOKEN`, `TWILIO_FROM` | Text messages through Twilio. All three or none |
+| `STRIPE_SECRET_KEY`, `STRIPE_WEBHOOK_SECRET` | Card payment links and their webhook. See "Card payments" |
 | `AI_PROVIDER`, `ANTHROPIC_API_KEY` | Physiotherapy drafting. The default is a labelled mock |
 
 Serve the app only over HTTPS, behind a proxy that sets `X-Forwarded-Proto: https`. The app then sends `Strict-Transport-Security` and `upgrade-insecure-requests`. Without that header it assumes plain HTTP and sends neither, so the browser is never told to insist on HTTPS.
@@ -33,6 +34,25 @@ Before the first real send:
 5. Text sender: a number you have bought, or an alphanumeric sender name registered with Twilio (not all UK networks accept unregistered names).
 
 Each email carries a stable `Message-ID` taken from the outbox row, so a duplicate attempt is recognisable to the receiver. The outbox records a failed attempt as a status code only (for example `SMTP 550` or `Twilio 400 code 21211`); look the code up with the provider. Provider messages are not stored because they usually repeat the recipient's address. Patient phone numbers are converted from UK format to international form (07700 900123 becomes +447700900123); a number that cannot be converted fails with "not a valid phone number" and is not retried successfully, so fix the patient's number.
+
+## Card payments
+
+With `STRIPE_SECRET_KEY` set, an unpaid patient invoice shows "Make a card payment link". The patient pays on Stripe's own page, so card details never reach Fettle. Stripe is told only the invoice number, the amount and internal ids, never a patient's name, contact details or anything clinical. Stripe is a sub-processor of payment data: sign its data-processing terms and list it in your privacy notice.
+
+Set up:
+
+1. In the Stripe dashboard add a webhook endpoint `<APP_BASE_URL>/api/stripe/webhook` for `checkout.session.completed` and `checkout.session.async_payment_succeeded`, and put its signing secret in `STRIPE_WEBHOOK_SECRET`. Without that secret the endpoint answers 404.
+2. Use a test-mode key first and pay a test invoice with Stripe's test card. Check the payment appears on the invoice as "Card payment (Stripe)".
+
+How it behaves:
+
+- Each notification is verified against the signing secret and must be less than five minutes old. A wrong signature gets 400.
+- A payment is recorded once, however many times Stripe sends it (the Stripe payment id is unique per clinic).
+- If a payment cannot be applied (the invoice was cancelled, already paid another way, or the amount is more than is owed), nothing is recorded and an entry `payment.unapplied` is written to the audit log with the invoice and amount. **Refund those in the Stripe dashboard.** Check the audit log for that entry now and then, and alert on the `stripe.event` log line with `result: unapplied`.
+- Refunds are not automatic. Refund in Stripe, then on the invoice use "Reverse or refund" with the reason, so the books match.
+- Payment links last 24 hours. Making a second link for the same balance within ten minutes returns the same link.
+- Links are for the patient's balance on a patient invoice, at least £0.30; insurer invoices are excluded.
+- Stripe's own fees are not recorded in Fettle.
 
 ## Deploying and upgrading
 
@@ -113,4 +133,5 @@ Alert on: `level":"error"`, `/api/health` failing, a `tick` line with `failed` o
 
 - `scripts/backup.sh` and `scripts/restore-verify.sh`: run against a local Postgres 16 with and without encryption. A wrong passphrase, a corrupted file and a backup missing a migration each fail with a clear message.
 - Email and text providers: tested against a local SMTP server and a local stand-in for Twilio's API (delivery, wrong password, rejected recipient, no encryption offered, unreachable service, retries). Never against a real provider.
+- Card payments: tested against a local stand-in for Stripe's API (link creation, signature checking, once-only recording, unapplied payments, wrong clinic). A local run recorded a signed test notification once and ignored a repeat and a bad signature. Never against Stripe itself.
 - Not yet tested: a managed Postgres, a scheduled job, off-site copy, restore onto a different server, restore timing at real data sizes.

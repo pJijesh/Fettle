@@ -1,4 +1,5 @@
 import { normaliseVatNumber } from "./vat";
+import type { CardProvider } from "./payments/stripe";
 import crypto from "node:crypto";
 import type { SessionUser } from "./accounts";
 import type { Db } from "./db";
@@ -136,11 +137,22 @@ interface Row {
  * Billing is open to the owner and to reception; clinicians are not given access to the takings.
  */
 export class Billing {
+  private card: CardProvider | null = null;
+
   constructor(
     private db: Db,
     private scheduling: Scheduling,
     private now: () => Date = () => new Date(),
   ) {}
+
+  /** Switches on card payment links. Without a provider there are none. */
+  setCardProvider(card: CardProvider | null) {
+    this.card = card;
+  }
+
+  get cardPaymentsEnabled(): boolean {
+    return this.card !== null;
+  }
 
   private ts() {
     return this.now().toISOString();
@@ -517,6 +529,67 @@ export class Billing {
       );
       await this.scheduling.audit(actor.clinicId, actor.email, "payment.recorded", "invoice", { invoiceId, paymentId: id, amountPence: input.amountPence, method: input.method });
       return id;
+    });
+  }
+
+  /**
+   * A link the patient opens to pay what is owed on an invoice by card, on the card provider's own page. Card
+   * details never touch Fettle. The money is recorded when the provider tells us it has been paid (see
+   * applyCardPayment), not when the link is made.
+   */
+  async createCardLink(actor: SessionUser, invoiceId: string, baseUrl: string): Promise<{ url: string; amountPence: number }> {
+    this.allow(actor);
+    if (!this.card) throw new DomainError("invalid_state", "Card payments are not switched on for this clinic");
+    const card = this.card;
+    const inv = await this.db.scope(actor.clinicId, () => this.summaryOf(actor.clinicId, invoiceId));
+    if (inv.kind !== "invoice") throw new DomainError("invalid_state", "A credit note cannot be paid");
+    if (inv.status === "credited") throw new DomainError("invalid_state", "This invoice has been cancelled by a credit note");
+    if (inv.balancePence <= 0) throw new DomainError("invalid_state", "Nothing is owed on this invoice");
+    if (inv.balancePence < 30) throw new DomainError("invalid_state", "Card payments need at least £0.30. Record this one another way");
+    if (inv.payerType === "insurer") throw new DomainError("invalid_state", "This invoice is billed to an insurer, not the patient");
+    // The network call happens outside any open transaction.
+    const session = await card.createCheckout({
+      amountPence: inv.balancePence,
+      description: `Invoice ${inv.number}`,
+      invoiceId,
+      clinicId: actor.clinicId,
+      successUrl: `${baseUrl}/pay/thanks`,
+      cancelUrl: `${baseUrl}/pay/cancelled`,
+      idempotencyKey: `${invoiceId}:${inv.balancePence}:${Math.floor(this.now().getTime() / 600_000)}`,
+      expiresAt: new Date(this.now().getTime() + 24 * 3_600_000),
+    });
+    await this.db.scope(actor.clinicId, () => this.scheduling.audit(actor.clinicId, actor.email, "payment.link_created", "invoice", { invoiceId, amountPence: inv.balancePence }));
+    return { url: session.url, amountPence: inv.balancePence };
+  }
+
+  /**
+   * Records a card payment the provider reports as complete. Safe to call twice for the same payment. If the money
+   * cannot be applied (the invoice was cancelled, already paid another way, or does not exist) nothing is
+   * recorded and the case is written to the audit log for a person to deal with, usually by refunding in the
+   * provider's dashboard. The caller must already have verified that the notification is genuine.
+   */
+  async applyCardPayment(clinicId: string, p: { invoiceId: string; amountPence: number; externalId: string; paidAt?: Date }): Promise<"recorded" | "duplicate" | "unapplied"> {
+    if (!Number.isInteger(p.amountPence) || p.amountPence <= 0 || !p.externalId) throw new DomainError("validation", "Not a valid card payment");
+    return this.db.scope(clinicId, async () => {
+      await this.db.lock(`invoice:${p.invoiceId}`);
+      if (await this.db.get("SELECT 1 FROM payments WHERE clinic_id = ? AND external_id = ?", [clinicId, p.externalId])) return "duplicate";
+      const unapplied = async (reason: string) => {
+        await this.scheduling.audit(clinicId, "stripe", "payment.unapplied", "invoice", { invoiceId: p.invoiceId, amountPence: p.amountPence, externalId: p.externalId, reason });
+        return "unapplied" as const;
+      };
+      const row = await this.db.get<Row>(`${Billing.SUMMARY_SQL} WHERE i.id = ? AND i.clinic_id = ?`, [p.invoiceId, clinicId]);
+      if (!row) return unapplied("invoice not found");
+      const inv = this.toSummary(row);
+      if (inv.kind !== "invoice") return unapplied("not an invoice");
+      if (inv.status === "credited") return unapplied("invoice was cancelled");
+      if (p.amountPence > inv.balancePence) return unapplied("more than the balance owed");
+      await this.db.run(
+        `INSERT INTO payments (id, clinic_id, invoice_id, amount_pence, method, received_at, reference, reverses_payment_id, recorded_by, created_at, external_id)
+         VALUES (?, ?, ?, ?, 'card', ?, 'Card payment (Stripe)', NULL, 'stripe', ?, ?)`,
+        [crypto.randomUUID(), clinicId, p.invoiceId, p.amountPence, (p.paidAt ?? this.now()).toISOString(), this.ts(), p.externalId],
+      );
+      await this.scheduling.audit(clinicId, "stripe", "payment.recorded", "invoice", { invoiceId: p.invoiceId, amountPence: p.amountPence, method: "card", externalId: p.externalId });
+      return "recorded";
     });
   }
 

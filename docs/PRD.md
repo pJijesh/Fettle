@@ -138,7 +138,7 @@ Ayurveda is not a regulated profession in the UK. The product records who practi
 | B6 | VAT at one rate for the whole invoice | Built |
 | B7 | **VAT registration number** required when VAT is charged, validated, and printed on invoices | Built |
 | B8 | Refund wording: Fettle records money and does not send it; how "reverse" and "credit note" are used | Built |
-| B9 | Card payments (Stripe) | Not built |
+| B9 | Card payments (Stripe): a payment link per invoice, recorded once by a signed webhook | Built, tested against a stand-in for Stripe only. Needs a Stripe account, a sub-processor agreement and a live test payment |
 | B10 | Insurer claim submission (currently only the insurer and claim reference are recorded) | Not built |
 | B11 | Accountant review of invoice wording and VAT handling | Needs others |
 
@@ -227,7 +227,7 @@ Access to billing is owner and reception only. Clinicians are denied.
 | Money | Whole pence everywhere |
 | Drafting | Provider interface: a labelled mock by default; Anthropic available |
 
-Migrations: 0001 schema, 0002 hardening, 0003 billing, 0004 Ayurveda, 0005 records and VAT number, 0006 form discipline.
+Migrations: 0001 schema, 0002 hardening, 0003 billing, 0004 Ayurveda, 0005 records and VAT number, 0006 form discipline, 0007 card payment ids.
 
 Repository layout is in the README.
 
@@ -241,7 +241,7 @@ Consultation workflow · diary and front desk · row-level security on Postgres 
 
 ### Gap fixes (merged, PR #5)
 
-Patient export, anonymisation and retention (P3 to P5) · Content-Security-Policy, HSTS, Permissions-Policy · structured logs, backup and restore-verify scripts, runbook, `npm audit` in CI · VAT registration number on invoices and refund wording. 213 tests pass.
+Patient export, anonymisation and retention (P3 to P5) · Content-Security-Policy, HSTS, Permissions-Policy · structured logs, backup and restore-verify scripts, runbook, `npm audit` in CI · VAT registration number on invoices and refund wording. 224 tests pass.
 
 ### Next, in order
 
