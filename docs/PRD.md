@@ -255,7 +255,7 @@ Patient export, anonymisation and retention (P3 to P5) · Content-Security-Polic
 | 6 | Closed pilot with one or two clinics, then a load test | Steps 1 to 5 |
 | 7 | DPIA, DCB0129, DTAC, MHRA analysis, penetration test, manual accessibility review | A pilot to learn from |
 | 8 | Card payments (Stripe), insurer claim submission | Accounts; demand from the pilot |
-| 9 | Ayurveda intake form, note templates, audio capture, mobile apps | Pilot feedback |
+| 9 | Note templates, audio capture, mobile apps | Pilot feedback |
 
 ### Gate to real patient data
 
