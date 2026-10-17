@@ -90,6 +90,17 @@ Check-ins are sorted on arrival by plain rules (stored on the check-in with a on
 
 Migrations only move forward. To go back, restore the pre-upgrade backup.
 
+## Pilot hosting (demo data only)
+
+The pilot site runs on Vercel (project `fettle`) against a Neon Postgres database in AWS London (`eu-west-2`) on Neon's free plan. This is a demonstration set-up. Do not put real patient data in it.
+
+- **No real backups.** The free plan keeps about 6 hours of change history and 1 GB of storage. Before real patients, move to a plan with point-in-time recovery, or to Azure UK South, and set up the scheduled off-site backups below.
+- **Two roles.** The owner role (`neondb_owner`) is used only to apply migrations, through Neon's SQL editor or `npm run db:migrate` with `DATABASE_OWNER_URL`. The app connects as `fettle_app`, which migration 0001 creates without a login; give it one with `ALTER ROLE fettle_app LOGIN PASSWORD '...'`.
+- **`DATABASE_URL` in Vercel** uses `fettle_app` and the pooled host (the name contains `-pooler`): `postgres://fettle_app:PASSWORD@HOST/neondb?sslmode=require`. Use a password of letters and numbers only, or percent-encode it (`@` is `%40`, `#` is `%23`, `!` is `%21`). Leave out `channel_binding=require`. Never put `DATABASE_OWNER_URL` in Vercel.
+- **Changing a variable needs a redeploy.** A running deployment keeps the values it was built with.
+- **No background work.** Set `DISABLE_BACKGROUND_TICK=1` on Vercel. Reminders and other scheduled work then run only when something calls `POST /api/worker` with `CRON_SECRET`, so set that up before relying on reminders.
+- **Checking it:** `GET /api/health` returns `{"status":"ok"}` when the app can reach the database. A 503 with `database error 28P01` in the Vercel logs means the password is wrong; `ENOTFOUND` means the host is wrong.
+
 ## Backups
 
 ```bash
