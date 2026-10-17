@@ -3,6 +3,7 @@ import { redirect } from "next/navigation";
 import { currentSession } from "@/lib/auth";
 import { getAccounts } from "@/lib/app";
 import { loginAction } from "../actions/auth";
+import { signupOpen, trialDays } from "@/lib/plans";
 import { ActionForm } from "../Forms";
 
 export const dynamic = "force-dynamic";
@@ -26,6 +27,7 @@ export default async function LoginPage({ searchParams }: { searchParams: Promis
         </ActionForm>
         <p className="muted" style={{ marginTop: 12 }}><Link href="/forgot-password">Forgot your password?</Link></p>
       </div>
+      {signupOpen() ? <p className="muted">New to Fettle? <Link href="/signup">Start your {trialDays()}-day free trial</Link>. No card needed.</p> : null}
     </main>
   );
 }

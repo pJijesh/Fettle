@@ -1,4 +1,5 @@
-import { requireUser } from "@/lib/auth";
+import { isReadOnly, requireUser } from "@/lib/auth";
+import { LOCKED_MESSAGE } from "@/lib/plans";
 import { getService, withClinic } from "@/lib/app";
 import { logError } from "@/lib/log";
 import { MAX_AUDIO_BYTES } from "@/lib/speech/types";
@@ -14,6 +15,7 @@ const json = (status: number, body: unknown) => Response.json(body, { status, he
  */
 export async function POST(req: Request, ctx: { params: Promise<{ id: string }> }) {
   const user = await requireUser(["owner", "clinician"]);
+  if (await isReadOnly(user.clinicId)) return json(402, { ok: false, message: LOCKED_MESSAGE });
   const { id } = await ctx.params;
   const declared = Number(req.headers.get("content-length") ?? "0");
   if (declared > MAX_AUDIO_BYTES) return json(413, { ok: false, message: "The recording is too large. Keep it under 100 MB." });

@@ -1,7 +1,8 @@
 import type { Db } from "./db";
 import { logError } from "./log";
 import { createMailer } from "./mail";
-import { StripeCards, type CardProvider } from "./payments/stripe";
+import { StripeCards, StripeSubscriptions, type CardProvider, type SubscriptionProvider } from "./payments/stripe";
+import { Plans } from "./plans";
 import { Accounts } from "./accounts";
 import { Booking } from "./booking";
 import { Forms } from "./forms";
@@ -22,7 +23,7 @@ import { createAssist, type AssistProvider } from "./assist";
 import { Waitlist } from "./waitlist";
 
 /** Wires the diary, forms, messaging and waiting list together. One per process. */
-export function createPlatform(db: Db, opts: { now?: () => Date; baseUrl?: () => string; mailer?: Mailer; card?: CardProvider | null; assist?: AssistProvider } = {}) {
+export function createPlatform(db: Db, opts: { now?: () => Date; baseUrl?: () => string; mailer?: Mailer; card?: CardProvider | null; assist?: AssistProvider; subscriptions?: SubscriptionProvider | null } = {}) {
   const now = opts.now ?? (() => new Date());
   const baseUrl = opts.baseUrl ?? (() => (process.env.APP_BASE_URL ?? "http://localhost:3000").replace(/\/$/, ""));
   const mailer = opts.mailer ?? createMailer();
@@ -47,6 +48,9 @@ export function createPlatform(db: Db, opts: { now?: () => Date; baseUrl?: () =>
   if (opts.card !== undefined) billing.setCardProvider(opts.card);
   else if (process.env.STRIPE_SECRET_KEY) billing.setCardProvider(new StripeCards({ secretKey: process.env.STRIPE_SECRET_KEY, baseUrl: process.env.STRIPE_API_BASE || undefined }));
   const records = new Records(db, scheduling, now);
+  const plans = new Plans(db, now);
+  if (opts.subscriptions !== undefined) plans.setProvider(opts.subscriptions);
+  else if (process.env.STRIPE_SECRET_KEY) plans.setProvider(new StripeSubscriptions({ secretKey: process.env.STRIPE_SECRET_KEY, baseUrl: process.env.STRIPE_API_BASE || undefined }));
 
   accounts.setResetHook((m) => notifier.passwordReset(m.clinicId, m.to, m.name, m.token).then(() => undefined));
 
@@ -114,7 +118,7 @@ export function createPlatform(db: Db, opts: { now?: () => Date; baseUrl?: () =>
     return total;
   }
 
-  return { db, now, accounts, scheduling, forms, templates, documents, assistant, assist, triage, progress, booking, waitlist, outbox, notifier, ical, importer, reports, billing, records, mailer, tick, baseUrl };
+  return { db, now, accounts, scheduling, forms, templates, documents, assistant, assist, triage, progress, booking, waitlist, outbox, notifier, ical, importer, reports, billing, records, plans, mailer, tick, baseUrl };
 }
 
 export type Platform = ReturnType<typeof createPlatform>;

@@ -55,6 +55,16 @@ How it behaves:
 - Links are for the patient's balance on a patient invoice, at least £0.30; insurer invoices are excluded.
 - Stripe's own fees are not recorded in Fettle.
 
+## Free trial and the paid plan
+
+Every new clinic starts on a free trial (`TRIAL_DAYS`, default 7, no card needed). When it ends, the clinic can still sign in, look up patients and appointments and export a record, but cannot add or change anything, online booking is switched off, and a red banner explains why. Nothing is deleted. Choosing a plan turns everything back on. Clinics created before this feature are marked complimentary and are never locked.
+
+- **Self-service sign-up** is at `/signup` and is **off unless `SIGNUP_OPEN=1`**. Leave it off until the items in the README's "Before real patients" are done: anyone who finds the page can open a clinic. It is rate-limited to five attempts an hour per address.
+- **The plan** is one flat monthly price per clinic. In Stripe create a recurring monthly Price, put its id in `STRIPE_PRICE_ID`, and put the amount to display (whole pence) in `PLAN_PRICE_PENCE`. Add these events to the same webhook endpoint as card payments: `checkout.session.completed`, `invoice.paid`, `invoice.payment_failed`, `customer.subscription.deleted`. The owner pays from **Settings → Plan** and manages the card or cancels in Stripe's own portal (turn the customer portal on in the Stripe dashboard first).
+- **How access follows payment:** a paid invoice sets "paid up to" the end of the period it covers. If a renewal fails there are three days of grace, then the clinic goes read-only until it pays. A cancelled plan works until the end of the period already paid for.
+- **Not covered here:** reminders and messages already queued still go out for a locked clinic, so patients are not left uninformed. There is no operator screen to list every clinic's plan; query `clinic_plans`, and to give a clinic free access set its `status` to `complimentary` as the database owner.
+- The first test of this against real Stripe has not been done. Use a test-mode key, subscribe with a test card, and check the clinic shows "Subscribed, paid up to ..." on the Plan page.
+
 ## Audio capture
 
 Off by default. With `SPEECH_PROVIDER=azure` (plus `AZURE_SPEECH_ENDPOINT`, the address of your own Azure AI Speech resource, and `AZURE_SPEECH_KEY`), a physiotherapy consultation shows "Record the consultation" once consent is recorded. `SPEECH_PROVIDER=mock` is a demo that invents text; never use it with real patients. Locale defaults to `en-GB`.
@@ -173,6 +183,7 @@ Alert on: `level":"error"`, `/api/health` failing, a `tick` line with `failed` o
 - `scripts/backup.sh` and `scripts/restore-verify.sh`: run against a local Postgres 16 with and without encryption. A wrong passphrase, a corrupted file and a backup missing a migration each fail with a clear message.
 - Email and text providers: tested against a local SMTP server and a local stand-in for Twilio's API (delivery, wrong password, rejected recipient, no encryption offered, unreachable service, retries). Never against a real provider.
 - Card payments: tested against a local stand-in for Stripe's API (link creation, signature checking, once-only recording, unapplied payments, wrong clinic). A local run recorded a signed test notification once and ignored a repeat and a bad signature. Never against Stripe itself.
+- Trial and plan: tested against a local stand-in for Stripe (checkout request shape, signed events in any order, repeats, failed renewal and grace, cancellation) and in a browser (sign-up, trial banner, choosing a plan, an ended trial blocked from adding a patient but able to read and export, online booking off, unlocking on payment, two clinics kept apart). Never against Stripe itself.
 - Audio capture: tested against a local stand-in for Azure's speech API (request shape, speaker renumbering, failures reduced to a status code) and in a browser with a fake microphone (record, stop, text added, swap labels, a 30 MB upload, wrong type, missing confirmation, signed out). Never against the real service or a real microphone.
 - AI assistance: tested with a scripted assistant (what is sent and not sent, approved-only, edit and finalise rules, withdrawal, failure saves nothing, clinic separation, anonymise and export) and in a browser with the demo assistant. The live Anthropic API has not been called for these tasks.
 - Progress and check-in triage: tested with a scripted assistant (rules, assistant can only raise, failure falls back, comment-only data sent, owner-only switch, clinic separation) and in a browser with the demo assistant (Check-ins list, chart and table, summary, Settings). The live API has not been called.

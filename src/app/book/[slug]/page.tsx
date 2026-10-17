@@ -19,6 +19,14 @@ export default async function BookPage({ params, searchParams }: { params: Promi
   if (!info) notFound();
   const { clinic, types, clinicians } = info;
   const type = types.find((t) => t.id === sp.type);
+  if (!(await p.plans.isOpen(clinic.id))) {
+    return (
+      <PublicShell clinicName={clinic.name}>
+        <h1>Book an appointment</h1>
+        <p>Online booking is not available at the moment. Please phone the clinic.</p>
+      </PublicShell>
+    );
+  }
 
   if (!type) {
     return (

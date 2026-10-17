@@ -105,6 +105,29 @@ export class Accounts {
     return this.db.system(async () => !(await this.db.get<{ n: boolean }>("SELECT setup_needed() AS n"))?.n);
   }
 
+  /** Self-service sign-up: opens a new clinic and its owner on a free trial. Open to anyone, so the caller rate-limits it. */
+  async register(input: { clinicName: string; ownerName: string; email: string; password: string; trialDays?: number }): Promise<{ clinicId: string; userId: string }> {
+    const issues = this.userIssues({ name: input.ownerName, email: input.email, password: input.password });
+    if (!input.clinicName.trim()) issues.push({ path: "clinicName", message: "Enter the clinic's name" });
+    if (issues.length) throw new DomainError("validation", "Check the details", issues);
+    const clinicId = crypto.randomUUID();
+    const userId = crypto.randomUUID();
+    try {
+      await this.db.system(() =>
+        this.db.run("SELECT register_clinic(?, ?, ?, 'Europe/London', ?, ?, ?, ?, ?, ?::int)", [
+          clinicId, input.clinicName.trim(), slugify(input.clinicName) || "clinic", userId, input.email.trim(), input.ownerName.trim(), hashPassword(input.password), this.ts(), input.trialDays ?? 7,
+        ]),
+      );
+    } catch (err) {
+      if (String(err).includes("email_taken")) {
+        throw new DomainError("validation", "There is already an account with that email. Sign in, or reset the password if you have forgotten it.", [{ path: "email", message: "Already has an account" }]);
+      }
+      throw err;
+    }
+    await this.db.scope(clinicId, () => this.audit(clinicId, input.email, "clinic.registered"));
+    return { clinicId, userId };
+  }
+
   /** First-run only: creates the first clinic and its owner. Refused once any user exists. */
   async bootstrap(input: { clinicName: string; ownerName: string; email: string; password: string }): Promise<{ clinicId: string; userId: string }> {
     if (await this.hasUsers()) throw new DomainError("invalid_state", "Setup has already been done");
