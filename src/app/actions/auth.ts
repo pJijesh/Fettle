@@ -7,6 +7,7 @@ import { getAccounts, getPlatform } from "@/lib/app";
 import { seedClinic } from "@/lib/seed";
 import { allow } from "@/lib/session";
 import { logError } from "@/lib/log";
+import { signupOpen, trialDays } from "@/lib/plans";
 import { fail, field, clientKey, cookieSecure, type ActionState } from "@/lib/action-util";
 
 async function setSession(token: string) {
@@ -20,6 +21,24 @@ export async function setupAction(_prev: ActionState, form: FormData): Promise<A
     const password = field(form, "password");
     if (password !== field(form, "password2")) return { ok: false, message: "The two passwords are not the same.", issues: [{ path: "password2", message: "Re-enter the same password" }] };
     const { clinicId, userId } = await p.accounts.bootstrap({ clinicName: field(form, "clinicName"), ownerName: field(form, "ownerName"), email: field(form, "email"), password });
+    const pick = field(form, "disciplines");
+    await seedClinic(p.db, clinicId, userId, new Date(), pick === "ayurveda" || pick === "both" ? pick : "physio");
+    const { token } = await p.accounts.login(field(form, "email"), password);
+    await setSession(token);
+  } catch (err) {
+    return fail(err);
+  }
+  redirect("/account/mfa");
+}
+
+export async function signupAction(_prev: ActionState, form: FormData): Promise<ActionState> {
+  if (!signupOpen()) return { ok: false, message: "Sign-up is not open." };
+  if (!(await allow(`signup:${await clientKey()}`, 5, 60 * 60_000))) return { ok: false, message: "Too many attempts. Wait a while and try again." };
+  const p = getPlatform();
+  try {
+    const password = field(form, "password");
+    if (password !== field(form, "password2")) return { ok: false, message: "The two passwords are not the same.", issues: [{ path: "password2", message: "Re-enter the same password" }] };
+    const { clinicId, userId } = await p.accounts.register({ clinicName: field(form, "clinicName"), ownerName: field(form, "ownerName"), email: field(form, "email"), password, trialDays: trialDays() });
     const pick = field(form, "disciplines");
     await seedClinic(p.db, clinicId, userId, new Date(), pick === "ayurveda" || pick === "both" ? pick : "physio");
     const { token } = await p.accounts.login(field(form, "email"), password);

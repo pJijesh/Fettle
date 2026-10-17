@@ -14,6 +14,8 @@ export async function bookAction(_prev: ActionState, form: FormData): Promise<Ac
   const slug = field(form, "slug");
   let token: string;
   try {
+    const clinic = await getPlatform().scheduling.clinicBySlug(slug);
+    if (clinic && !(await getPlatform().plans.isOpen(clinic.id))) return { ok: false, message: "Online booking is not available at the moment. Please phone the clinic." };
     const r = await getPlatform().booking.book(slug, {
       typeId: field(form, "typeId"), userId: field(form, "userId"), startAt: field(form, "startAt"),
       firstName: field(form, "firstName"), lastName: field(form, "lastName"), dob: field(form, "dob"), email: field(form, "email"),

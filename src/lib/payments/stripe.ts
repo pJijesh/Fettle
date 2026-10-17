@@ -59,6 +59,61 @@ export class StripeCards implements CardProvider {
   }
 }
 
+/** Starting and managing the clinic's own plan (separate from the card links a clinic sends its patients). */
+export interface SubscriptionProvider {
+  createSubscriptionCheckout(input: {
+    clinicId: string;
+    priceId: string;
+    customerId: string | null;
+    successUrl: string;
+    cancelUrl: string;
+    idempotencyKey: string;
+  }): Promise<CardCheckout>;
+  createPortalSession(input: { customerId: string; returnUrl: string }): Promise<{ url: string }>;
+}
+
+async function stripePost(cfg: { secretKey: string; baseUrl?: string }, path: string, form: URLSearchParams, idempotencyKey?: string): Promise<Record<string, unknown>> {
+  const headers: Record<string, string> = { authorization: `Bearer ${cfg.secretKey}`, "content-type": "application/x-www-form-urlencoded" };
+  if (idempotencyKey) headers["idempotency-key"] = idempotencyKey;
+  const res = await fetch(`${cfg.baseUrl ?? "https://api.stripe.com"}${path}`, { method: "POST", headers, body: form.toString(), signal: AbortSignal.timeout(15_000) }).catch(() => {
+    throw new Error("Stripe: could not be reached");
+  });
+  if (!res.ok) throw new Error(`Stripe ${res.status}`);
+  return (await res.json()) as Record<string, unknown>;
+}
+
+export class StripeSubscriptions implements SubscriptionProvider {
+  constructor(private cfg: { secretKey: string; baseUrl?: string }) {}
+
+  async createSubscriptionCheckout(i: Parameters<SubscriptionProvider["createSubscriptionCheckout"]>[0]): Promise<CardCheckout> {
+    const p = new URLSearchParams();
+    p.set("mode", "subscription");
+    p.set("success_url", i.successUrl);
+    p.set("cancel_url", i.cancelUrl);
+    p.set("client_reference_id", i.clinicId);
+    p.set("line_items[0][price]", i.priceId);
+    p.set("line_items[0][quantity]", "1");
+    if (i.customerId) p.set("customer", i.customerId);
+    // Only the clinic's identifier goes to Stripe from here; Checkout asks the owner for the email and card itself.
+    for (const prefix of ["metadata", "subscription_data[metadata]"]) {
+      p.set(`${prefix}[clinic_id]`, i.clinicId);
+      p.set(`${prefix}[kind]`, "plan");
+    }
+    const body = await stripePost(this.cfg, "/v1/checkout/sessions", p, i.idempotencyKey);
+    if (typeof body.id !== "string" || typeof body.url !== "string") throw new Error("Stripe: unexpected reply");
+    return { id: body.id, url: body.url };
+  }
+
+  async createPortalSession(i: { customerId: string; returnUrl: string }): Promise<{ url: string }> {
+    const p = new URLSearchParams();
+    p.set("customer", i.customerId);
+    p.set("return_url", i.returnUrl);
+    const body = await stripePost(this.cfg, "/v1/billing_portal/sessions", p);
+    if (typeof body.url !== "string") throw new Error("Stripe: unexpected reply");
+    return { url: body.url };
+  }
+}
+
 export interface StripeEvent {
   id: string;
   type: string;

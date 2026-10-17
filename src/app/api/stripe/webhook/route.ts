@@ -27,8 +27,8 @@ export async function POST(req: Request) {
   }
 
   try {
-    const out = await handleStripeEvent(getPlatform().billing, event);
-    logInfo("stripe.event", { type: event.type, event: event.id, result: String(out.body.result ?? out.body.ignored ?? (out.body.pending ? "pending" : "")) });
+    const out = await handleStripeEvent(getPlatform().billing, event, getPlatform().plans);
+    logInfo("stripe.event", { type: event.type, event: event.id, result: String(out.body.result ?? out.body.plan ?? out.body.ignored ?? (out.body.pending ? "pending" : "")) });
     return Response.json(out.body, { status: out.status });
   } catch (err) {
     logError("stripe-webhook", err);
